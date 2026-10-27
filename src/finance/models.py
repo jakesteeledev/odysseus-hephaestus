@@ -132,7 +132,105 @@ class FinanceBankMapping(TimestampMixin, Base):
     config_json = Column(Text, nullable=False, default="{}")
 
 
-FINANCE_TABLES = [
+# ── v2: assets, liabilities and their history ──────────────────────────
+
+ASSET_TYPES = ("property", "investment", "pension", "vehicle", "other")
+LIABILITY_TYPES = ("mortgage", "loan", "student_loan", "bnpl", "other")
+ITEM_KINDS = ("asset", "liability")
+
+
+class FinanceAsset(TimestampMixin, Base):
+    """Something the owner holds outside their accounts (house, ISA, pension...)."""
+
+    __tablename__ = "finance_assets"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    asset_type = Column(String, nullable=False, default="other")
+    subtype = Column(String, nullable=False, default="")  # e.g. isa, sipp, crypto
+    provider = Column(String, nullable=False, default="")
+    notes = Column(Text, nullable=False, default="")
+    archived = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint("asset_type IN ('property', 'investment', 'pension', 'vehicle', 'other')",
+                        name="ck_finance_asset_type"),
+    )
+
+
+class FinanceLiability(TimestampMixin, Base):
+    """Money owed outside credit cards (mortgage, loans, student loan, BNPL...)."""
+
+    __tablename__ = "finance_liabilities"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    liability_type = Column(String, nullable=False, default="other")
+    subtype = Column(String, nullable=False, default="")  # e.g. personal, pcp, hp, plan_2
+    lender = Column(String, nullable=False, default="")
+    notes = Column(Text, nullable=False, default="")
+    archived = Column(Boolean, nullable=False, default=False)
+    # A mortgage secured on a property asset, for equity.
+    linked_asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("liability_type IN ('mortgage', 'loan', 'student_loan', 'bnpl', 'other')",
+                        name="ck_finance_liability_type"),
+    )
+
+
+class FinanceValuation(TimestampMixin, Base):
+    """A dated value (asset) or balance owed (liability). The latest one counts."""
+
+    __tablename__ = "finance_valuations"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    item_kind = Column(String, nullable=False)
+    item_id = Column(String, nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    value_pence = Column(Integer, nullable=False)
+    note = Column(String, nullable=False, default="")
+
+    __table_args__ = (
+        CheckConstraint("item_kind IN ('asset', 'liability')", name="ck_finance_valuation_kind"),
+        CheckConstraint("value_pence >= 0", name="ck_finance_valuation_non_negative"),
+        Index("ix_finance_valuation_item_date", "item_kind", "item_id", "date"),
+    )
+
+
+class FinanceContribution(TimestampMixin, Base):
+    """Money paid into an investment or pension, optionally a linked transaction."""
+
+    __tablename__ = "finance_contributions"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    amount_pence = Column(Integer, nullable=False)
+    note = Column(String, nullable=False, default="")
+    # Deleting the transaction (or undoing its import) removes the contribution.
+    transaction_id = Column(String, ForeignKey("finance_transactions.id", ondelete="CASCADE"),
+                            nullable=True, unique=True)
+
+    __table_args__ = (
+        CheckConstraint("amount_pence > 0", name="ck_finance_contribution_positive"),
+    )
+
+
+class FinanceMeta(Base):
+    """Finance schema bookkeeping (key/value), e.g. schema_version."""
+
+    __tablename__ = "finance_meta"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
+
+V1_TABLES = [
     FinanceAccount.__table__,
     FinanceCategory.__table__,
     FinanceImportBatch.__table__,
@@ -140,17 +238,30 @@ FINANCE_TABLES = [
     FinanceRule.__table__,
     FinanceBankMapping.__table__,
 ]
+V2_TABLES = [
+    FinanceAsset.__table__,
+    FinanceLiability.__table__,
+    FinanceValuation.__table__,
+    FinanceContribution.__table__,
+]
+FINANCE_TABLES = V1_TABLES + V2_TABLES + [FinanceMeta.__table__]
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()
 _ensure_lock = threading.Lock()
 
 
 def ensure_tables(bind) -> None:
-    """Create the finance tables on *bind* if they are missing (idempotent)."""
+    """Bring the finance schema on *bind* up to date (idempotent, once per engine).
+
+    See ``src.finance.migrations``: existing finance data is backed up before
+    any migration step runs.
+    """
     if bind in _ensured:
         return
     with _ensure_lock:
         if bind in _ensured:
             return
-        Base.metadata.create_all(bind=bind, tables=FINANCE_TABLES)
+        from src.finance.migrations import migrate
+
+        migrate(bind)
         _ensured.add(bind)

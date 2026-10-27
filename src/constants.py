@@ -91,6 +91,8 @@ CHROMA_DIR = os.path.join(DATA_DIR, "chroma")
 BG_JOBS_DIR = os.path.join(DATA_DIR, "bg_jobs")
 PROCESS_RESOURCES_DIR = os.path.join(DATA_DIR, "process_resources")
 BROWSER_RESOURCES_DIR = os.path.join(DATA_DIR, "browser_resources")
+# HEPHAESTUS PATCH: finance writes a database copy here before schema migrations.
+FINANCE_BACKUP_DIR = os.path.join(DATA_DIR, "backups")
 DEEP_RESEARCH_DIR = os.path.join(DATA_DIR, "deep_research")
 MCP_OAUTH_DIR = os.path.join(DATA_DIR, "mcp_oauth")
 GENERATED_IMAGES_DIR = os.path.join(DATA_DIR, "generated_images")
