@@ -19,6 +19,7 @@ from core.database import SessionLocal, engine
 from src.auth_helpers import require_user
 from src.finance import csv_io, imports
 from src.finance import budgets as bud
+from src.finance import insights
 from src.finance import loans
 from src.finance import recurring as rec
 from src.finance import networth as nw
@@ -539,6 +540,30 @@ def setup_finance_routes() -> APIRouter:
         owner = _owner(request)
         with _session() as db:
             return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"))
+
+    # Charts (v2 stage 5): specific paths before the generic routes below.
+
+    @router.get("/insights/history")
+    def insights_history(request: Request, range: str = "1y"):
+        owner = _owner(request)
+        with _session() as db:
+            return insights.net_worth_history(db, owner, range_key=range)
+
+    @router.get("/insights/monthly")
+    def insights_monthly(request: Request, range: str = "1y", category_id: Optional[str] = None):
+        owner = _owner(request)
+        with _session() as db:
+            return insights.monthly_totals(db, owner, range_key=range, category_id=category_id or None)
+
+    @router.get("/insights/spending")
+    def insights_spending(request: Request, start: str, end: str, account_id: Optional[str] = None):
+        """Money in/out and spending by category for start..end (both inclusive)."""
+        owner = _owner(request)
+        with _session() as db:
+            start_d, end_d = _range(None, None, start, end)
+            if start_d is None or end_d is None or end_d <= start_d:
+                raise fin.FinanceError("choose a start date before the end date")
+            return fin.summary(db, owner, start=start_d, end=end_d, account_id=account_id or None)
 
     # Budgets (v2 stage 4): specific paths before the generic routes below.
 
