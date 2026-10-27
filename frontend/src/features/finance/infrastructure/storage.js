@@ -2,6 +2,7 @@
 
 export const LAST_ACCOUNT_KEY = 'odysseus-finance-last-account';
 export const LAST_TAB_KEY = 'odysseus-finance-tab';
+export const CHART_RANGE_KEY = 'odysseus-finance-chart-range';
 
 export function createFinanceStorage({ storage }) {
   const get = (key) => { try { return storage ? storage.getItem(key) : null; } catch { return null; } };
@@ -11,5 +12,7 @@ export function createFinanceStorage({ storage }) {
     rememberAccount: (id) => { if (id) set(LAST_ACCOUNT_KEY, id); },
     lastTab: () => get(LAST_TAB_KEY) || '',
     rememberTab: (tab) => set(LAST_TAB_KEY, tab),
+    chartRange: () => (['6m', '1y', 'all'].includes(get(CHART_RANGE_KEY)) ? get(CHART_RANGE_KEY) : ''),
+    rememberChartRange: (value) => set(CHART_RANGE_KEY, value),
   };
 }

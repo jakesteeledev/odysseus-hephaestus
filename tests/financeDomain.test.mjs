@@ -51,3 +51,20 @@ test('CSV header sniffing and mapping guesses', () => {
   assert.equal(split.paid_out_column, 'Paid Out');
   assert.equal(split.date_column, 'Transaction Date');
 });
+
+test('chart helpers: compact axis money, clean ticks and month labels', async () => {
+  const { compactPence, niceTicks, monthShort } = await import('../frontend/src/features/finance/ui/charts.js');
+  assert.equal(compactPence(0), '£0');
+  assert.equal(compactPence(85000), '£850');
+  assert.equal(compactPence(120000), '£1.2K');
+  assert.equal(compactPence(1500000), '£15K');
+  assert.equal(compactPence(120000000), '£1.2M');
+  assert.equal(compactPence(-200000), '-£2K');
+  const ticks = niceTicks(-300000, 1200000);
+  assert.ok(ticks.includes(0) && ticks[0] <= -300000 && ticks[ticks.length - 1] >= 1200000);
+  const steps = new Set(ticks.slice(1).map((t, i) => t - ticks[i]));
+  assert.equal(steps.size, 1);
+  assert.deepEqual(niceTicks(0, 0).slice(0, 1), [0]);
+  assert.equal(monthShort('2026-10'), 'Oct');
+  assert.equal(monthShort('2027-01', true), 'Jan 27');
+});

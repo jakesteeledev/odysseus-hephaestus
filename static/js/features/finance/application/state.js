@@ -168,6 +168,8 @@ export function createFinanceState({ api, storage, now }) {
     makeRecurring: (transactionId, body) => mutate(() => api.makeRecurring(transactionId, body)),
     budgetStatus: () => api.budgets(state.month.year, state.month.month),
     setBudget: (categoryId, body) => api.setBudget(categoryId, body),
+    netWorthHistory: (range) => api.history(range).then((r) => r.points),
+    monthlyTotals: (range, categoryId) => api.monthly(range, categoryId).then((r) => r.points),
     linkContribution: (transactionId, assetId) => mutate(() => api.linkContribution(transactionId, assetId)),
     itemById,
     createItem: (kind, body) => mutate(() => api.createItem(collectionOf(kind), body)),
@@ -209,5 +211,7 @@ export function createFinanceState({ api, storage, now }) {
     exportUrl: (params) => api.exportUrl(params),
     lastTab: () => storage.lastTab(),
     rememberTab: (tab) => storage.rememberTab(tab),
+    chartRange: () => storage.chartRange(),
+    rememberChartRange: (value) => storage.rememberChartRange(value),
   };
 }

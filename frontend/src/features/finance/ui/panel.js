@@ -94,7 +94,7 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
       case 'transactions': views.transactions.render(el); break;
       case 'upcoming': views.upcoming.render(el); break;
       case 'budgets': views.budgets.render(el); break;
-      case 'insights': views.summary.render(el); break;
+      case 'insights': views.insights.render(el); break;
       case 'add': views.add(el, () => renderTab()); break;  // stay ready for the next entry
       case 'import': views.import.render(el); break;
       case 'settings': views.settings.render(el); break;

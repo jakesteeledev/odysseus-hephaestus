@@ -284,6 +284,14 @@
       "deployment": "js/features/finance/ui/budgetsView.js"
     },
     {
+      "source": "features/finance/ui/charts.js",
+      "deployment": "js/features/finance/ui/charts.js"
+    },
+    {
+      "source": "features/finance/ui/insightsView.js",
+      "deployment": "js/features/finance/ui/insightsView.js"
+    },
+    {
       "source": "features/finance/index.js",
       "deployment": "js/features/finance/index.js",
       "legacyImports": [
