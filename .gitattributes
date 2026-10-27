@@ -39,4 +39,6 @@ static/lib/** -whitespace linguist-vendored
 
 # Notes reference deployment modules.
 static/js/features/notes/** text eol=lf
+# HEPHAESTUS PATCH: finance feature deployment output.
+static/js/features/finance/** text eol=lf
 static/js/shared/ui/confetti.js text eol=lf
