@@ -18,11 +18,14 @@ from typing import Iterable, Mapping
 from src.action_intents import classify_tool_intent
 from src.tool_policy import ToolPolicy
 from src.text_scanning import has_prefixed_token_match
+# HEPHAESTUS PATCH: finance tracker vocabulary (pure regex module).
+from src.finance.routing import FINANCE_FAMILY_PATTERN, FINANCE_TOOLS
 
 
 FAMILY_TOOLS = {
     "calendar": frozenset({"manage_calendar"}),
     "notes": frozenset({"manage_notes"}),
+    "finance": FINANCE_TOOLS,  # HEPHAESTUS PATCH
     "tasks": frozenset({"manage_tasks"}),
     "skills": frozenset({"manage_skills"}),
     "memory": frozenset({"manage_memory", "search_chats"}),
@@ -107,6 +110,7 @@ def _mentions_under_budget(text: str) -> bool:
 _FAMILY_WORDS = {
     "calendar": r"\b(?:calendar|calender|events?|appointments?|meetings?|agenda)\b",
     "notes": r"\b(?:notes?|checklists?|groceries|remind\s+me)\b",
+    "finance": FINANCE_FAMILY_PATTERN,  # HEPHAESTUS PATCH
     "tasks": r"\b(?:tasks?|todos?|schedul(?:ed|d)\s+jobs?|automations?)\b",
     "skills": r"\bskills?\b",
     "memory": r"\b(?:memory|memories|memores|remember|forget|past\s+chats?|previous\s+conversations?)\b",

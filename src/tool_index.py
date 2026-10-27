@@ -15,6 +15,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
+# HEPHAESTUS PATCH: finance tracker vocabulary.
+from src.finance.routing import FINANCE_KEYWORDS, FINANCE_TOOLS
 from src.embedding_lanes import (
     LANE_CUSTOM,
     LANE_FASTEMBED,
@@ -175,6 +177,10 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "resolve_contact": "Look up a contact's email address by name. Searches CardDAV address book and sent email history. Use when the user says 'message [name]', 'email [name]', or 'send to [name]' without an email address.",
     "manage_contact": "Save / update / delete / list / search address-book contacts (CardDAV). Use for info about ANOTHER person — name, email, phone, postal address. Args: action=list|search|find|add|update|delete, query, name, email, phones, address, uid (from list/search). For 'save this for <person>' / address pastes / phone numbers next to a name, this is the right tool — NOT manage_memory. Do NOT use for facts about the USER ('my name is X'); those are manage_memory.",
     "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
+    # HEPHAESTUS PATCH: finance tracker tools.
+    "query_finances": "Read the user's own money records in GBP: net worth, account balances, money in/out, spending by category over a period, and recent transactions. Use for net worth, balance, how much did I spend/earn, savings, credit card, budget and transaction questions.",
+    "add_transaction": "Record money spent or received (GBP) on one of the user's existing finance accounts, with optional category, description and date (default today). Ambiguous or unknown account/category names come back as options to ask about.",
+    "add_transfer": "Record a transfer of money (GBP) between two of the user's own finance accounts, e.g. current to savings. Not counted as income or spending.",
     "manage_calendar": "Calendar event management: preserve titles exactly, resolve relative dates from current local date, use local ISO wall time, and ask_user if date/time/target is missing. List, create, update, delete. Each event can carry a tag/category (event_type — work/personal/health/travel/meal/social/admin/other) and importance (low/normal/high/critical). Resolve today/tomorrow using the Current date and time context, then use ISO datetimes in the user's local wall time; supports all-day events. If create/update lacks a required date, time, or target event, call ask_user once instead of guessing. For update_event, only pass event_type/tag/category/type when the user explicitly asks to tag, retag, categorize, or clear the tag; otherwise omit it so manually tagged events keep their existing tag. Use rrule only for explicit recurrence; examples: every Monday = FREQ=WEEKLY;BYDAY=MO, first and last Monday of each month = FREQ=MONTHLY;BYDAY=1MO,-1MO, second Thursday of each month = FREQ=MONTHLY;BYDAY=2TH, last Sunday of each month = FREQ=MONTHLY;BYDAY=-1SU. For update_event pass rrule='' to remove repeats. For event reminders/alarms, pass reminder_minutes; this creates the Notes reminder, so do not also call manage_notes for the same reminder.",
     "download_model": "Download a HuggingFace model to a local or remote server. Specify repo_id (e.g. 'Qwen/Qwen3-8B'), optional server host, and optional include filter for specific files.",
     "serve_model": "Start serving a model with vLLM, SGLang, llama.cpp, Ollama, or Diffusers. cmd MUST start with the binary directly — e.g. `vllm serve /mnt/HADES/models/Qwen3.5-397B-A17B-AWQ --port 8003 --tensor-parallel-size 8 …`. NEVER prefix with `cd …`, `source …`, or chain with `&&`/`||` — those get rejected by the validator. The venv activation (env_prefix) and CUDA env are added automatically from the target host's saved settings. For image/inpainting/diffusion use python3 scripts/diffusion_server.py --model <repo> --port 8100. After launch, call list_served_models for readiness/errors and retry suggestions. If serve_model fails with 'Invalid characters in cmd', simplify to the bare binary + args.",
@@ -416,6 +422,9 @@ class ToolIndex:
             {"list_email_accounts", "list_emails", "search_emails", "read_email", "download_attachment", "scan_email_unsubscribes", "scan_spam", "unsubscribe_email", "send_email", "reply_to_email", "bulk_email", "block_sender", "manage_email_state", "delete_email", "archive_email", "mark_email_read", "resolve_contact", "ui_control"},
         frozenset({"calendar", "event", "meeting", "schedule", "appointment"}):
             {"manage_calendar"},
+        # HEPHAESTUS PATCH: finance tracker (vocabulary in src/finance/routing.py).
+        frozenset(FINANCE_KEYWORDS):
+            set(FINANCE_TOOLS),
         # Detached background `bash` jobs (#!bg): check on / read output / kill.
         frozenset({"background job", "background jobs", "bg job", "bg jobs",
                    "background task", "is the job done", "check the job",
