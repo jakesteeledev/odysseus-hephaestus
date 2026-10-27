@@ -32,12 +32,13 @@
  */
 
 :root {
-  /* Core palette */
-  --bg: #282c34;
-  --fg: #9cdef2;
-  --panel: #111;
-  --border: #355a66;
-  --red: #e06c75;
+  /* Core palette — HEPHAESTUS PATCH: Hephaestus defaults (upstream: #282c34,
+     #9cdef2, #111, #355a66, #e06c75) so a fresh browser paints the fork theme. */
+  --bg: #1a1410;
+  --fg: #d8c8b8;
+  --panel: #120d0a;
+  --border: #5a3218;
+  --red: #ff7220;
   /* Were `var(--green)` / `var(--warn)` — self-referential, so they
      resolved to invalid and every site fell back to its own literal
      (or, for sites with no fallback, painted as transparent/inherit).

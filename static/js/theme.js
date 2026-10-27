@@ -9,6 +9,13 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js?v=20260910responsivebounds1';
 
 export const THEMES = {
+  // HEPHAESTUS PATCH: the fork's default theme (dark brown, cream, orange to gold).
+  hephaestus: { bg:'#1a1410', fg:'#d8c8b8', panel:'#120d0a', border:'#5a3218', red:'#ff7220',
+                advanced: { userBubbleBg: '#2a1c12', aiBubbleBg: '#120d0a', bubbleBorder: '#5a3218',
+                            sidebarBg: '#120d0a', brandColor: '#ff7220', brandMixTo: '#f2b632',
+                            hamburgerColor: '#ff9a5c', inputBg: '#120d0a', inputBorder: '#b35015',
+                            sendBtnBg: '#ff7220', sendBtnHover: '#ff9a5c', codeBg: '#0f0b08',
+                            codeFg: '#d8c8b8', toggleActive: '#ff7220' } },
   dark:       { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' },
   light:      { bg:'#f3f5f7', fg:'#26313a', panel:'#ffffff', border:'#cbd3da', red:'#b34d5c' },
   midnight:   { bg:'#0d1117', fg:'#c9d1d9', panel:'#161b22', border:'#30363d', red:'#f85149' },
@@ -34,7 +41,7 @@ export const THEMES = {
   yoyo:       { bg:'#211f23', fg:'#dfdbd7', panel:'#141415', border:'#3e5146', red:'#e09d6c' },
 };
 
-const DEFAULT_THEME = 'dark';
+const DEFAULT_THEME = 'hephaestus';  // HEPHAESTUS PATCH: was 'dark'
 const THEME_DISPLAY_NAMES = { ocean: 'starfield' };
 const LS_KEY = 'odysseus-theme';
 const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
@@ -56,6 +63,7 @@ const MAX_CUSTOM_THEMES = 8;
 
 // Default background patterns for built-in themes
 const THEME_DEFAULT_PATTERN = {
+  hephaestus: 'embers',  // HEPHAESTUS PATCH
   dark:       'none',
   light:      'dots',
   midnight:   'rain',
@@ -77,6 +85,7 @@ const THEME_DEFAULT_PATTERN = {
 
 // Default effect colors for specific themes (overrides --fg)
 const THEME_DEFAULT_EFFECT_COLOR = {
+  hephaestus: '#ff7220',  // HEPHAESTUS PATCH
   midnight:   '#ffffff',
   cyberpunk:  '#62c4c7',
   organs:     '#451616',
@@ -91,6 +100,7 @@ const THEME_DEFAULT_EFFECT_COLOR = {
 
 // Default effect intensity (0..1) per theme. Any theme not listed defaults to 1.
 const THEME_DEFAULT_INTENSITY = {
+  hephaestus: 0.6,  // HEPHAESTUS PATCH
   midnight:   0.5,
   cyberpunk:  0.55,
   terminal:   0.8,
@@ -1001,15 +1011,19 @@ export function initThemeUI() {
       applyColors(colors);
       syncPickers(colors);
       applyFontDensity(DEFAULT_FONT, DEFAULT_DENSITY);
-      applyBgPattern('none');
+      // HEPHAESTUS PATCH: reset to the default theme's own background effect.
+      const _resetPattern = THEME_DEFAULT_PATTERN[DEFAULT_THEME] || 'none';
+      applyBgEffectColor(THEME_DEFAULT_EFFECT_COLOR[DEFAULT_THEME] || '');
+      applyBgEffectIntensity(THEME_DEFAULT_INTENSITY[DEFAULT_THEME] !== undefined ? THEME_DEFAULT_INTENSITY[DEFAULT_THEME] : 1);
+      applyBgPattern(_resetPattern);
       const fs = document.getElementById('theme-font-select');
       const ds = document.getElementById('theme-density-select');
       const ps = document.getElementById('theme-bg-pattern-select');
       if (fs) fs.value = DEFAULT_FONT;
       if (ds) ds.value = DEFAULT_DENSITY;
-      if (ps) ps.value = 'none';
+      if (ps) ps.value = _resetPattern;
       grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
-      const darkSwatch = grid.querySelector('[data-theme="dark"]');
+      const darkSwatch = grid.querySelector(`[data-theme="${DEFAULT_THEME}"]`);  // HEPHAESTUS PATCH
       if (darkSwatch) darkSwatch.classList.add('active');
     });
   }
@@ -1157,16 +1171,18 @@ export function initThemeUI() {
   // Font, density, background pattern controls
   const _initFont = normalizeFont(saved && saved.font);
   const _initDensity = (saved && saved.density) || DEFAULT_DENSITY;
-  const _initPattern = (saved && saved.bgPattern) || (saved && THEME_DEFAULT_PATTERN[saved.name]) || 'none';
-  const _initEffectColor = (saved && saved.bgEffectColor) || (saved && THEME_DEFAULT_EFFECT_COLOR[saved.name]) || '';
+  // HEPHAESTUS PATCH: with no saved theme, use the default theme's effect settings.
+  const _defName = saved ? saved.name : DEFAULT_THEME;
+  const _initPattern = (saved && saved.bgPattern) || THEME_DEFAULT_PATTERN[_defName] || 'none';
+  const _initEffectColor = (saved && saved.bgEffectColor) || THEME_DEFAULT_EFFECT_COLOR[_defName] || '';
   const _initEffectIntensity = (saved && saved.bgEffectIntensity !== undefined)
     ? saved.bgEffectIntensity
-    : (saved && THEME_DEFAULT_INTENSITY[saved.name] !== undefined ? THEME_DEFAULT_INTENSITY[saved.name] : 1);
-  const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : (saved && THEME_DEFAULT_SIZE[saved.name] !== undefined ? THEME_DEFAULT_SIZE[saved.name] : 1);
-  const _initEffectSpeed = (saved && saved.bgEffectSpeed !== undefined) ? saved.bgEffectSpeed : (saved && THEME_DEFAULT_SPEED[saved.name] !== undefined ? THEME_DEFAULT_SPEED[saved.name] : 1);
+    : (THEME_DEFAULT_INTENSITY[_defName] !== undefined ? THEME_DEFAULT_INTENSITY[_defName] : 1);
+  const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : (THEME_DEFAULT_SIZE[_defName] !== undefined ? THEME_DEFAULT_SIZE[_defName] : 1);
+  const _initEffectSpeed = (saved && saved.bgEffectSpeed !== undefined) ? saved.bgEffectSpeed : (THEME_DEFAULT_SPEED[_defName] !== undefined ? THEME_DEFAULT_SPEED[_defName] : 1);
   const _initFrosted = (saved && saved.frosted !== undefined)
     ? !!saved.frosted
-    : (saved && THEME_DEFAULT_FROSTED[saved.name] === true);
+    : (THEME_DEFAULT_FROSTED[_defName] === true);
   applyFontDensity(_initFont, _initDensity);
   applyBgEffectColor(_initEffectColor);
   applyBgEffectIntensity(_initEffectIntensity);
