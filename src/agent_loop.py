@@ -420,6 +420,34 @@ def _contract_allows_single_action_terminal(contract) -> bool:
     return contract is None or len(contract.capabilities) <= 1
 
 
+# HEPHAESTUS PATCH: spot requests that list several things to add ("add the
+# following events: ... / ..."), so one successful create does not end the turn.
+_MULTI_ITEM_WORDS = re.compile(
+    r"\b(?:both|all\s+(?:of\s+)?(?:these|them|the)|each\s+of|the\s+following|following\s+\w+|"
+    r"these\s+(?:events?|items?|notes?|tasks?|reminders?|contacts?|appointments?)|"
+    r"(?:two|three|four|five|six|several|multiple)\s+(?:different\s+)?"
+    r"(?:events?|items?|notes?|tasks?|reminders?|contacts?|appointments?|things))\b",
+    re.IGNORECASE,
+)
+_DATE_MENTION = re.compile(
+    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+    r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|monday|tuesday|wednesday|"
+    r"thursday|friday|saturday|sunday|today|tomorrow)\b|\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b",
+    re.IGNORECASE,
+)
+
+
+def _request_lists_multiple_items(text: str) -> bool:
+    value = str(text or "")
+    if _MULTI_ITEM_WORDS.search(value):
+        return True
+    lines = [line for line in re.split(r"[\r\n]+", value) if line.strip()]
+    item_lines = [line for line in lines[1:] if _DATE_MENTION.search(line) or re.match(r"\s*(?:[-*•]|\d+[.)])\s", line)]
+    if len(item_lines) >= 2:
+        return True
+    return len(_DATE_MENTION.findall(value)) >= 3
+
+
 def _request_has_compound_actions(text: str) -> bool:
     """Return whether a turn explicitly requests multiple semantic operations."""
     value = str(text or "")
@@ -25673,7 +25701,37 @@ async def stream_agent_loop(
                 or (approved.tool_name in {"create_document", "edit_document", "update_document"})
             )
         )
-        if _approved_effectful:
+        # HEPHAESTUS PATCH: when the approval covers the rest of the task (both chat
+        # card choices and typed "yes" do), let the model continue so a request
+        # with several steps ("add these two events") finishes. The approved
+        # change is registered with the repeat guard, so if the model proposes
+        # it again it is skipped and told to do only what remains.
+        _approved_continue = bool(
+            _approved_effectful
+            and exact_approval is not None
+            and exact_approval.allow_remaining_actions
+        )
+        if _approved_continue:
+            _approved_block = ToolBlock(approved.tool_name, approved.content)
+            for _approved_sig in (
+                _workspace_mutation_signature(_approved_block),
+                _contract_mutation_signature(_approved_block, turn_contract),
+            ):
+                if _approved_sig:
+                    _successful_mutation_signatures.add(_approved_sig)
+            messages.append({
+                "role": "system",
+                "content": (
+                    "The user approved the action above and it has been done. "
+                    "Do not repeat it. Carry out any remaining parts of the user's "
+                    "request, then briefly confirm everything that was done."
+                ),
+            })
+            logger.info(
+                "[agent] approved %s succeeded; continuing for remaining steps",
+                approved.tool_name,
+            )
+        if _approved_effectful and not _approved_continue:
             full_response = "Done."
             # The approval question was streamed on the original request and
             # is already rendered as its own approval card. On the approval
@@ -36144,6 +36202,8 @@ async def stream_agent_loop(
             _qwen_explicit_effectful_completed
             and _deterministic_terminal_eligible
             and _contract_allows_single_action_terminal(turn_contract)
+            # HEPHAESTUS PATCH: a request listing several items gets more turns.
+            and not _request_lists_multiple_items(_last_user)
         ):
             if _calendar_effect_anchor and f"#event-" not in full_response:
                 full_response = (full_response.rstrip() + _calendar_effect_anchor).strip()
