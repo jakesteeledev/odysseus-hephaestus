@@ -54,7 +54,8 @@ async def test_availability_and_model_selection_do_not_grant_execution(monkeypat
 @pytest.mark.parametrize("user_text,allowed,denied", [
     ("Transcribe /workspace/input/audio.wav", "transcribe_media", "bash"),
     ("OCR extract exact text from /workspace/input/image.png", "extract_text", "python"),
-    ("List my tasks", "manage_tasks", "web_fetch"),
+    # HEPHAESTUS PATCH: web tools are always granted, so check narrowness against bash.
+    ("List my tasks", "manage_tasks", "bash"),
     ("Search the web for current weather", "web_search", "bash"),
 ])
 def test_explicit_request_classes_remain_narrow(user_text, allowed, denied):
@@ -86,7 +87,8 @@ def test_browser_fallback_does_not_authorize_interaction_or_evaluation():
 
 def test_unknown_intent_has_no_generic_execution_floor():
     grant = create_request_authority("Please solve this")
-    assert {g.tool for g in grant.grants} == {"ask_user", "update_plan"}
+    # HEPHAESTUS PATCH: web_search and web_fetch are always granted.
+    assert {g.tool for g in grant.grants} == {"ask_user", "update_plan", "web_search", "web_fetch"}
 
 
 @pytest.mark.parametrize("metadata", [

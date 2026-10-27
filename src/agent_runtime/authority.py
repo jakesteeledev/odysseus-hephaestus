@@ -368,7 +368,42 @@ def interpret_request(request_text, *, history=(), workspace=None, active_docume
         # router already chooses host_shell; neither its schema nor bridge
         # availability grants Bash/Python alongside this request.
         return SemanticIntent(frozenset({"shell_files"}), frozenset({"host_shell"}), None)
+    # HEPHAESTUS PATCH: a follow-up that names no capability of its own ("you forgot
+    # the other one?") keeps the capabilities of the user's own recent request.
+    if selected is None and not (families - {"unknown"}):
+        inherited = _inherit_followup_families(request_text, trusted_history,
+            active_document=active_document, workspace=bool(workspace))
+        if inherited:
+            families = inherited
     return SemanticIntent(families, selected, required_read_operation_for_request(request_text, history))
+
+
+# HEPHAESTUS PATCH: how many earlier user messages a follow-up may inherit from.
+_FOLLOWUP_LOOKBACK = 3
+
+
+def _inherit_followup_families(request_text, trusted_history, *, active_document=False, workspace=False):
+    """Capabilities named by the nearest recent trusted *user* message.
+
+    Only user-typed rows are considered (interpret_request already dropped
+    assistant, tool and untrusted rows), so model output or web content can
+    never become a grant source through this path.
+    """
+    rows = list(trusted_history)
+    if rows and str(rows[-1].get("content", "")).strip() == request_text.strip():
+        rows.pop()  # the current message may already be in session history
+    for back in range(1, min(_FOLLOWUP_LOOKBACK, len(rows)) + 1):
+        index = len(rows) - back
+        prior = str(rows[index].get("content", "") or "")
+        families = requested_capabilities(prior, rows[:index],
+            active_document=active_document, workspace=workspace) - {"unknown"}
+        if families:
+            import logging
+            logging.getLogger(__name__).info(
+                "[authority] follow-up inherited capabilities %s from user message %d back",
+                sorted(families), back)
+            return frozenset(families)
+    return frozenset()
 
 
 def create_request_authority(request_text, *, owner=None, session_id=None, workspace=None,
@@ -394,7 +429,8 @@ def create_request_authority(request_text, *, owner=None, session_id=None, works
     else:
         operation = None
     grants = []
-    for name in sorted(tools | {"ask_user", "update_plan"}):
+    # HEPHAESTUS PATCH: web_search and web_fetch are always granted.
+    for name in sorted(tools | {"ask_user", "update_plan", "web_search", "web_fetch"}):
         name = canonical_tool(name)
         actions = inputs = None
         if name == "private_browser":

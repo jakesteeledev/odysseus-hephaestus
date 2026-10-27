@@ -763,6 +763,70 @@ def delegated_tool_is_blocked(tool_name: Any, content: Any = None) -> bool:
     )
 
 
+# HEPHAESTUS PATCH: let web_fetch skip the post-external approval only for URLs that
+# web_search returned verbatim in this run. Such a URL was fixed before the model
+# saw any private data, so it cannot carry exfiltrated content. web_fetch is
+# GET-only and outbound_fetch still enforces public, DNS-pinned destinations.
+_SEARCH_URL_RE = re.compile(r"https?://[^\s<>\"'\\\]\)\}]+", re.IGNORECASE)
+_WEB_FETCH_SAFE_KEYS = frozenset({"url", "urls", "query", "full", "max_bytes"})
+
+
+def _normalize_search_url(url: str) -> str:
+    url = url.strip().rstrip(".,;:!?")
+    url = url.split("#", 1)[0]
+    return url.rstrip("/")
+
+
+def _urls_in(value: Any) -> set[str]:
+    try:
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        text = str(value)
+    return {_normalize_search_url(m) for m in _SEARCH_URL_RE.findall(text or "")}
+
+
+def _web_fetch_targets_search_results(content: Any, search_urls: set[str]) -> bool:
+    if not search_urls:
+        return False
+    raw = content.strip() if isinstance(content, str) else ""
+    payload: Any = content
+    if isinstance(content, str):
+        if raw.startswith("{"):
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                return False
+        else:
+            if "\n" in raw:
+                return False
+            payload = {"url": raw}
+    if not isinstance(payload, Mapping) or set(payload) - _WEB_FETCH_SAFE_KEYS:
+        return False
+    if "urls" in payload:
+        items = payload["urls"]
+        if not isinstance(items, list) or not items or "url" in payload:
+            return False
+        urls = []
+        for item in items:
+            if isinstance(item, Mapping):
+                if set(item) - _WEB_FETCH_SAFE_KEYS:
+                    return False
+                item = item.get("url")
+            urls.append(item)
+    else:
+        urls = [payload.get("url")]
+    from src.outbound_fetch import _public_http_url
+
+    for url in urls:
+        if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+            return False
+        if "@" in url.split("/", 3)[2]:
+            return False
+        if _normalize_search_url(url) not in search_urls or not _public_http_url(url.strip()):
+            return False
+    return True
+
+
 @dataclass
 class ToolRunSecurityContext:
     """Server-owned integrity state for one agent run."""
@@ -782,6 +846,8 @@ class ToolRunSecurityContext:
     # Driven by a bearer API token, not a person at a browser. Privileged
     # tools are refused outright and no approval can lift that.
     delegated_credential: bool = False
+    # HEPHAESTUS PATCH: URLs returned verbatim by web_search during this run.
+    search_result_urls: set[str] = field(default_factory=set)
 
     def observe_messages(self, messages: Iterable[dict]) -> None:
         """Apply server-owned chat scope and promote untrusted prompt context."""
@@ -835,6 +901,11 @@ class ToolRunSecurityContext:
             return ToolGateDecision(True)
         if not self.external_untrusted_context_seen:
             return ToolGateDecision(True)
+        # HEPHAESTUS PATCH: verbatim web_search result URLs only.
+        if tool_name == "web_fetch" and _web_fetch_targets_search_results(
+            content, self.search_result_urls
+        ):
+            return ToolGateDecision(True)
 
         # Skills and other server-owned descriptors are control-plane metadata
         # rather than external result content; web/document/tool-result taint
@@ -881,6 +952,9 @@ class ToolRunSecurityContext:
         result: Any,
         content: Any = None,
     ) -> None:
+        # HEPHAESTUS PATCH: remember URLs from successful web_search results.
+        if tool_name == "web_search" and tool_result_is_successful(result):
+            self.search_result_urls |= _urls_in(result)
         if not tool_result_should_arm_gate(tool_name, result, content):
             return
         self.external_untrusted_context_seen = True
