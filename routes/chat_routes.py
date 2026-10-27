@@ -106,6 +106,34 @@ from src.turn_contract import (
 logger = logging.getLogger(__name__)
 
 
+# HEPHAESTUS PATCH: typed replies that count as answering a waiting approval card.
+# The whole message must be the reply, so "yes but change the time" is not one.
+_VERBAL_APPROVE_RE = re.compile(
+    r"(?:yes|yeah|yep|yup|sure|ok|okay|approved?|allow(?:\s+it)?|go\s+ahead|do\s+it|"
+    r"proceed|confirm(?:ed)?|that'?s\s+fine|fine)"
+    r"(?:[\s,.!-]+(?:please|go\s+ahead|do\s+it|approved?|allow(?:\s+it)?|proceed|"
+    r"that'?s\s+fine|you\s+can|thanks?|thank\s+you|cheers))*[\s.!]*",
+    re.IGNORECASE,
+)
+_VERBAL_DENY_RE = re.compile(
+    r"(?:no|nope|nah|deny|denied|don'?t|do\s+not|stop|cancel)(?:[\s,.!-]+(?:thanks?|thank\s+you|"
+    r"don'?t\s+do\s+it|do\s+not\s+do\s+it))*[\s.!]*",
+    re.IGNORECASE,
+)
+
+
+def _verbal_approval_decision(message):
+    """Map a typed reply to an approval decision, or None if it is not one."""
+    text = str(message or "").strip()
+    if not text or len(text) > 60:
+        return None
+    if _VERBAL_APPROVE_RE.fullmatch(text):
+        return "approve"  # same as "Allow for this chat session"
+    if _VERBAL_DENY_RE.fullmatch(text):
+        return "deny"
+    return None
+
+
 def _append_internal_chat_context(ctx, message):
     tagged = untrusted_context_message("internal tool request", message)
     ctx.messages.append(tagged)
@@ -2809,6 +2837,31 @@ def setup_chat_routes(
                 finally:
                     notes_db.close()
             selected_notes_context = _format_selected_notes_context(selected_notes)
+
+            # HEPHAESTUS PATCH: a typed yes/no reply to the approval card waiting in
+            # this chat counts as clicking it. The same checks as a click still
+            # run below (no API tokens, owner/session match, sealed exact action).
+            if not tool_approval_id and not plan_mode and isinstance(message, str):
+                _verbal_decision = _verbal_approval_decision(message)
+                if _verbal_decision:
+                    try:
+                        # API tokens and internal tool calls can never approve.
+                        _reject_delegated_tool_approval(request)
+                        from src.agent_runtime.authority import require_user_approval_request
+                        require_user_approval_request(request)
+                    except HTTPException:
+                        _verbal_decision = None
+                if _verbal_decision:
+                    _waiting_approval = tool_approval_store.latest_for_session(
+                        owner=owner, session_id=session,
+                    )
+                    if _waiting_approval is not None:
+                        tool_approval_id = _waiting_approval.approval_id
+                        tool_approval_decision = _verbal_decision
+                        logger.info(
+                            "Typed reply %r answered pending tool approval for %s as %s",
+                            message, _waiting_approval.tool_name, _verbal_decision,
+                        )
 
             if tool_approval_id:
                 _reject_delegated_tool_approval(request)

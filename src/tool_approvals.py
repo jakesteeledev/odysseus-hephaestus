@@ -608,6 +608,20 @@ class ToolApprovalStore:
             self._purge_expired_locked(now)
             return self._pending.get(str(approval_id or ""))
 
+    def latest_for_session(self, *, owner: Any, session_id: Any) -> PendingToolApproval | None:
+        """HEPHAESTUS PATCH: the approval card currently waiting in this chat, if any."""
+        normalized_session = str(session_id or "")
+        if not normalized_session:
+            return None
+        normalized_owner = _normalized_owner(owner)
+        with self._lock:
+            self._purge_expired_locked(time.time())
+            waiting = [
+                pending for pending in self._pending.values()
+                if pending.owner == normalized_owner and pending.session_id == normalized_session
+            ]
+        return max(waiting, key=lambda pending: pending.created_at) if waiting else None
+
     def retire_for_session(self, *, owner: Any, session_id: Any) -> bool:
         """Discard pending actions superseded by an ordinary user turn.
 
