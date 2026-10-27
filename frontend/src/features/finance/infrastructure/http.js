@@ -57,5 +57,18 @@ export function createFinanceApi({ request }) {
     mappings: () => call('GET', '/mappings'),
     saveMapping: (body) => call('POST', '/mappings', body),
     deleteMapping: (id) => call('DELETE', `/mappings/${encodeURIComponent(id)}`),
+    // v2: net worth, assets and liabilities. `collection` is 'assets' or 'liabilities'.
+    networth: (asOf) => call('GET', `/networth${qs({ as_of: asOf })}`),
+    items: (collection, includeArchived = false) => call('GET', `/${collection}${qs({ include_archived: includeArchived || undefined })}`),
+    createItem: (collection, body) => call('POST', `/${collection}`, body),
+    updateItem: (collection, id, body) => call('PATCH', `/${collection}/${encodeURIComponent(id)}`, body),
+    deleteItem: (collection, id) => call('DELETE', `/${collection}/${encodeURIComponent(id)}`),
+    valuations: (collection, id) => call('GET', `/${collection}/${encodeURIComponent(id)}/valuations`),
+    addValuation: (collection, id, body) => call('POST', `/${collection}/${encodeURIComponent(id)}/valuations`, body),
+    deleteValuation: (id) => call('DELETE', `/valuations/${encodeURIComponent(id)}`),
+    contributions: (assetId) => call('GET', `/assets/${encodeURIComponent(assetId)}/contributions`),
+    addContribution: (assetId, body) => call('POST', `/assets/${encodeURIComponent(assetId)}/contributions`, body),
+    deleteContribution: (id) => call('DELETE', `/contributions/${encodeURIComponent(id)}`),
+    linkContribution: (transactionId, assetId) => call('PUT', `/transactions/${encodeURIComponent(transactionId)}/contribution`, { asset_id: assetId || null }),
   };
 }

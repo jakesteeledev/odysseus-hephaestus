@@ -69,7 +69,7 @@
 .fin-search { flex: 1 1 160px; }
 .fin-day-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.5; margin-top: 6px; }
 
-.fin-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.fin-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; }
 .fin-stat { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
 .fin-stat-label { font-size: 10px; opacity: 0.55; }
 .fin-breakdown { display: flex; flex-direction: column; gap: 6px; }
@@ -90,11 +90,22 @@
 .fin-rule-row { cursor: default; gap: 6px; }
 .fin-rule-add { align-items: center; }
 
+/* v2: net worth overview and item editor */
+.fin-add-btn { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; }
+.fin-headline-card { align-items: stretch; }
+.fin-headline { font-size: 22px; font-weight: 600; }
+.fin-group { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.fin-group-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; opacity: 0.75; padding: 0 2px; }
+.fin-static-row { cursor: default; }
+.fin-snapshot-add { align-items: center; }
+
 @media (max-width: 768px) {
   .fin-modal-content { width: 100%; }
   .fin-form-row { flex-direction: column; align-items: stretch; }
   .fin-rule-row { flex-wrap: wrap; }
   .fin-tab { padding: 8px 9px; }
   .fin-stats { grid-template-columns: 1fr; }
+  .fin-snapshot-add { flex-direction: row; flex-wrap: wrap; }
+  .fin-snapshot-add .fin-form-col { flex: 1 1 140px; }
   .fin-stat { flex-direction: row; justify-content: space-between; align-items: center; }
 }

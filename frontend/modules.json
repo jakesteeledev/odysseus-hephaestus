@@ -260,6 +260,18 @@
       "deployment": "js/features/finance/ui/panel.js"
     },
     {
+      "source": "features/finance/domain/items.js",
+      "deployment": "js/features/finance/domain/items.js"
+    },
+    {
+      "source": "features/finance/ui/itemView.js",
+      "deployment": "js/features/finance/ui/itemView.js"
+    },
+    {
+      "source": "features/finance/ui/overviewView.js",
+      "deployment": "js/features/finance/ui/overviewView.js"
+    },
+    {
       "source": "features/finance/index.js",
       "deployment": "js/features/finance/index.js",
       "legacyImports": [

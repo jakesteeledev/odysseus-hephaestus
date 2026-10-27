@@ -12,6 +12,9 @@ export function createFinanceState({ api, storage, now }) {
     accounts: [],          // active + archived, with balance_pence
     totalPence: 0,         // total of active accounts
     categories: [],
+    networth: null,        // assets - liabilities, grouped by type
+    assets: [],            // including archived, with current values
+    liabilities: [],
     month: { year: today.getFullYear(), month: today.getMonth() + 1 },
     filters: { accountId: '', categoryId: '', direction: '', q: '' },
     transactions: [],
@@ -32,6 +35,8 @@ export function createFinanceState({ api, storage, now }) {
 
   const activeAccounts = () => state.accounts.filter((a) => !a.archived);
   const accountById = (id) => state.accounts.find((a) => a.id === id) || null;
+  const itemById = (kind, id) => (kind === 'asset' ? state.assets : state.liabilities).find((i) => i.id === id) || null;
+  const collectionOf = (kind) => (kind === 'asset' ? 'assets' : 'liabilities');
   const categoryById = (id) => state.categories.find((c) => c.id === id) || null;
 
   /** Default account for new entries: last used if still active, else the first. */
@@ -43,10 +48,15 @@ export function createFinanceState({ api, storage, now }) {
   }
 
   async function loadBase() {
-    const [accounts, categories] = await Promise.all([api.accounts(true), api.categories()]);
+    const [accounts, categories, networth, assets, liabilities] = await Promise.all([
+      api.accounts(true), api.categories(), api.networth(), api.items('assets', true), api.items('liabilities', true),
+    ]);
     state.accounts = accounts.accounts;
     state.totalPence = accounts.total_pence;
     state.categories = categories.categories;
+    state.networth = networth;
+    state.assets = assets.assets;
+    state.liabilities = liabilities.liabilities;
   }
 
   async function loadMonth() {
@@ -133,11 +143,23 @@ export function createFinanceState({ api, storage, now }) {
     shiftMonth,
     goToMonth,
     setFilters,
-    addTransaction: (body) => mutate(async () => {
+    addTransaction: (body, { contributionAssetId } = {}) => mutate(async () => {
       const tx = await api.createTransaction(body);
       storage.rememberAccount(body.account_id);
+      if (contributionAssetId) await api.linkContribution(tx.id, contributionAssetId);
       return tx;
     }),
+    linkContribution: (transactionId, assetId) => mutate(() => api.linkContribution(transactionId, assetId)),
+    itemById,
+    createItem: (kind, body) => mutate(() => api.createItem(collectionOf(kind), body)),
+    updateItem: (kind, id, body) => mutate(() => api.updateItem(collectionOf(kind), id, body)),
+    deleteItem: (kind, id) => mutate(() => api.deleteItem(collectionOf(kind), id)),
+    listValuations: (kind, id) => api.valuations(collectionOf(kind), id).then((r) => r.valuations),
+    addValuation: (kind, id, body) => mutate(() => api.addValuation(collectionOf(kind), id, body)),
+    deleteValuation: (id) => mutate(() => api.deleteValuation(id)),
+    listContributions: (assetId) => api.contributions(assetId).then((r) => r.contributions),
+    addContribution: (assetId, body) => mutate(() => api.addContribution(assetId, body)),
+    deleteContribution: (id) => mutate(() => api.deleteContribution(id)),
     addTransfer: (body) => mutate(async () => {
       const pair = await api.createTransfer(body);
       storage.rememberAccount(body.from_account_id);

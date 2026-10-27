@@ -6,6 +6,8 @@ import { balanceHtml, emptyHtml, esc, optionsHtml } from './dom.js';
 export function createAccountsView({ app, ui }) {
   let showArchived = false;
   let editing = null; // account id, 'new', or null
+  let mounted = null; // the container currently showing this view
+  let afterSave = null; // set by a parent view that shows totals derived from accounts
 
   const typeOptions = (selected) => optionsHtml(
     Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => ({ value, label })), selected);
@@ -51,7 +53,9 @@ export function createAccountsView({ app, ui }) {
       </div>`;
   }
 
-  function render(container) {
+  function render(container, opts = {}) {
+    mounted = container;
+    afterSave = opts.afterSave || null;
     const { state } = app;
     const accounts = state.accounts.filter((a) => showArchived || !a.archived);
     const archivedCount = state.accounts.filter((a) => a.archived).length;
@@ -108,7 +112,7 @@ export function createAccountsView({ app, ui }) {
         else await app.createAccount(body);
         ui.showToast(account ? 'Account saved' : 'Account added');
         editing = null;
-        render(container);
+        if (afterSave) afterSave(); else render(mounted);
       } catch (err) { fail(err.message); }
     });
     form.querySelector('[data-action="archive"]')?.addEventListener('click', async () => {
@@ -116,7 +120,7 @@ export function createAccountsView({ app, ui }) {
         await app.updateAccount(account.id, { archived: !account.archived });
         ui.showToast(account.archived ? 'Account restored' : 'Account archived');
         editing = null;
-        render(container);
+        if (afterSave) afterSave(); else render(mounted);
       } catch (err) { fail(err.message); }
     });
     form.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
@@ -127,7 +131,7 @@ export function createAccountsView({ app, ui }) {
         await app.deleteAccount(account.id);
         ui.showToast('Account deleted');
         editing = null;
-        render(container);
+        if (afterSave) afterSave(); else render(mounted);
       } catch (err) { fail(err.status === 409 ? 'This account has transactions. Archive it instead to keep its history.' : err.message); }
     });
   }
@@ -136,5 +140,5 @@ export function createAccountsView({ app, ui }) {
     requestAnimationFrame(() => container.querySelector('#fin-acc-name')?.focus());
   }
 
-  return { render, reset: () => { editing = null; } };
+  return { render, reset: () => { editing = null; }, isEditing: () => editing !== null };
 }

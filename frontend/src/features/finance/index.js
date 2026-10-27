@@ -4,6 +4,8 @@ import { createFinanceStorage } from './infrastructure/storage.js';
 import { createFinanceState } from './application/state.js';
 import { createEntryForm } from './ui/entryForm.js';
 import { createAccountsView } from './ui/accountsView.js';
+import { createItemView } from './ui/itemView.js';
+import { createOverviewView } from './ui/overviewView.js';
 import { createMonthNav, createSummaryView, createTransactionsView } from './ui/transactionsView.js';
 import { createImportView } from './ui/importView.js';
 import { createSettingsView } from './ui/settingsView.js';
@@ -28,7 +30,11 @@ const ui = {
 const entryForm = createEntryForm({ app, ui, now });
 const monthNav = createMonthNav({ app });
 const views = {
-  accounts: createAccountsView({ app, ui }),
+  overview: createOverviewView({
+    app,
+    accountsView: createAccountsView({ app, ui }),
+    itemView: createItemView({ app, ui, now }),
+  }),
   transactions: createTransactionsView({ app, entryForm, monthNav }),
   summary: createSummaryView({ app, monthNav }),
   add: (container, afterSave) => entryForm.render(container, { onDone: afterSave }),

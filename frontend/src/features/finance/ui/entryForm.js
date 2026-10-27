@@ -29,6 +29,12 @@ export function createEntryForm({ app, ui, now }) {
     return optionsHtml(items, selected);
   }
 
+  /** Investments and pensions that money out can be linked to as a contribution. */
+  function contributionAssets(existing) {
+    return app.state.assets.filter((a) => ['investment', 'pension'].includes(a.type)
+      && (!a.archived || a.id === existing?.contribution_asset_id));
+  }
+
   /**
    * Render into `container`. `existing` is a transaction row to edit (or
    * null for a new entry). `onDone()` runs after a successful save/delete.
@@ -70,6 +76,12 @@ export function createEntryForm({ app, ui, now }) {
             <select id="fin-category" class="task-form-input" name="category"></select>
           </div>
         </div>
+        ${contributionAssets(existing).length && !isTransfer ? `
+        <div data-show-out>
+          <label class="task-form-label" for="fin-contribution">Contribution to (optional)</label>
+          <select id="fin-contribution" class="task-form-input" name="contribution">${optionsHtml(
+            contributionAssets(existing).map((a) => ({ value: a.id, label: a.name })), existing?.contribution_asset_id || '', { blank: 'Not a contribution' })}</select>
+        </div>` : ''}
         <label class="task-form-label" for="fin-description">Description</label>
         <input id="fin-description" class="task-form-input" name="description" maxlength="200" autocomplete="off"
           placeholder="e.g. Tesco" value="${esc(existing?.description || '')}">
@@ -105,6 +117,7 @@ export function createEntryForm({ app, ui, now }) {
       form.querySelectorAll('[data-show="transfer"]').forEach((el) => { el.hidden = mode !== 'transfer'; });
       form.querySelectorAll('[data-hide="transfer"]').forEach((el) => { el.hidden = mode === 'transfer'; });
       fromLabel.textContent = mode === 'transfer' ? 'From account' : 'Account';
+      form.querySelectorAll('[data-show-out]').forEach((el) => { el.hidden = mode !== 'out'; });
       if (mode === 'transfer') {
         const options = accountOptions(toId, { exclude: accountSel.value });
         toSel.innerHTML = options;
@@ -155,14 +168,19 @@ export function createEntryForm({ app, ui, now }) {
             Object.assign(body, { account_id: accountSel.value, direction: mode, category_id: catSel.value || null });
           }
           await app.updateTransaction(existing.id, body);
+          const contribution = mode === 'out' ? (form.querySelector('#fin-contribution')?.value || '') : '';
+          if (!isTransfer && contribution !== (existing.contribution_asset_id || '')) {
+            await app.linkContribution(existing.id, contribution || null);
+          }
           ui.showToast('Saved');
         } else if (mode === 'transfer') {
           if (!toSel.value || toSel.value === accountSel.value) { throw new Error('Choose two different accounts'); }
           await app.addTransfer({ from_account_id: accountSel.value, to_account_id: toSel.value, date, amount, description, notes });
           ui.showToast(`Transferred ${formatPence(pence)}`);
         } else {
+          const contribution = mode === 'out' ? (form.querySelector('#fin-contribution')?.value || '') : '';
           await app.addTransaction({ account_id: accountSel.value, date, amount, direction: mode,
-            category_id: catSel.value || null, description, notes });
+            category_id: catSel.value || null, description, notes }, { contributionAssetId: contribution || null });
           ui.showToast(`Added ${mode === 'in' ? 'money in' : 'money out'}: ${formatPence(pence)}`);
         }
         onDone();
