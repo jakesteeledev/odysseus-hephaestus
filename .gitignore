@@ -126,5 +126,7 @@ _scratch/
 
 # Odysseus-Hephaestus: machine-specific overrides and editor backups stay local
 docker-compose.override.yml
+# scripts/odysseus-backup snapshots contain the whole data/ directory (DB, keys).
+backups/
 *.bak
 *.bak[0-9]*
