@@ -70,5 +70,13 @@ export function createFinanceApi({ request }) {
     addContribution: (assetId, body) => call('POST', `/assets/${encodeURIComponent(assetId)}/contributions`, body),
     deleteContribution: (id) => call('DELETE', `/contributions/${encodeURIComponent(id)}`),
     linkContribution: (transactionId, assetId) => call('PUT', `/transactions/${encodeURIComponent(transactionId)}/contribution`, { asset_id: assetId || null }),
+    // v2 stage 2: loans.
+    loan: (liabilityId) => call('GET', `/liabilities/${encodeURIComponent(liabilityId)}/loan`),
+    setSchedule: (liabilityId, body) => call('PUT', `/liabilities/${encodeURIComponent(liabilityId)}/schedule`, body),
+    deleteSchedule: (liabilityId) => call('DELETE', `/liabilities/${encodeURIComponent(liabilityId)}/schedule`),
+    setInterestRate: (liabilityId, rate) => call('PUT', `/liabilities/${encodeURIComponent(liabilityId)}/interest-rate`, { interest_rate: rate || null }),
+    addRepayment: (liabilityId, body) => call('POST', `/liabilities/${encodeURIComponent(liabilityId)}/repayments`, body),
+    deleteRepayment: (id) => call('DELETE', `/repayments/${encodeURIComponent(id)}`),
+    linkPayment: (transactionId, liabilityId) => call('PUT', `/transactions/${encodeURIComponent(transactionId)}/payment`, { liability_id: liabilityId || null }),
   };
 }

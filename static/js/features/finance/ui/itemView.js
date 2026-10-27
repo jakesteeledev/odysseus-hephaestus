@@ -7,7 +7,7 @@ import { formatPence, isoDay } from '../domain/money.js';
 import { CONTRIBUTION_TYPES, typesFor } from '../domain/items.js';
 import { balanceHtml, emptyHtml, esc, optionsHtml } from './dom.js';
 
-export function createItemView({ app, ui, now }) {
+export function createItemView({ app, ui, now, loanSection }) {
   /**
    * Render the editor into `container`. `item` is null for a new one.
    * `onClose()` runs after save/cancel/delete.
@@ -154,7 +154,8 @@ export function createItemView({ app, ui, now }) {
     }
     el.innerHTML = `
       ${summary.length ? `<div class="fin-stats">${summary.join('')}</div>` : ''}
-      <h3 class="fin-section-title">${valueWord} history</h3>
+      ${kind === 'liability' ? '<div data-loan-slot></div>' : ''}
+      <h3 class="fin-section-title">${kind === 'liability' ? 'Balance snapshots (statements)' : `${valueWord} history`}</h3>
       <form class="fin-form-row fin-snapshot-add" data-valuation-form>
         <div class="fin-form-col"><input class="task-form-input" name="value" inputmode="decimal" autocomplete="off" placeholder="New ${valueWord.toLowerCase()} (£)" aria-label="New ${valueWord.toLowerCase()}"></div>
         <div class="fin-form-col"><input class="task-form-input" type="date" name="date" value="${isoDay(now())}" aria-label="Date"></div>
@@ -182,6 +183,8 @@ export function createItemView({ app, ui, now }) {
             ${c.transaction_id ? '' : `<button type="button" class="memory-item-btn" data-delete-contribution="${esc(c.id)}" title="Delete contribution" aria-label="Delete contribution">&times;</button>`}
           </div>`).join('') || emptyHtml('No contributions recorded yet.')}</div>` : ''}`;
 
+    const loanSlot = el.querySelector('[data-loan-slot]');
+    if (loanSlot && loanSection) loanSection.render(loanSlot, item, onChange);
     const valuationForm = el.querySelector('[data-valuation-form]');
     valuationForm.addEventListener('submit', async (e) => {
       e.preventDefault();

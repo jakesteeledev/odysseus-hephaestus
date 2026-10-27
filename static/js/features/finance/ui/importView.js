@@ -18,6 +18,7 @@ export function createImportView({ app, ui }) {
   let savedMappings = [];
   let preview = null;       // server preview response
   let overrides = {};       // row_number -> category id
+  let payOverrides = {};    // row_number -> liability id ('' = not a debt payment)
   let excluded = new Set(); // row numbers the user unticked
   let recent = [];
   let busy = false;
@@ -46,6 +47,14 @@ export function createImportView({ app, ui }) {
     return `<select class="task-form-input fin-row-cat" data-row-cat="${row.row_number}" aria-label="Category for row ${row.row_number}">${optionsHtml(items, chosen)}</select>`;
   }
 
+  function debtSelect(row) {
+    const debts = app.state.liabilities.filter((d) => !d.archived);
+    if (!debts.length || row.direction !== 'out') return '';
+    const chosen = row.row_number in payOverrides ? payOverrides[row.row_number] : (row.liability_id || '');
+    return `<select class="task-form-input fin-row-cat" data-row-debt="${row.row_number}" aria-label="Debt paid by row ${row.row_number}">${optionsHtml(
+      debts.map((d) => ({ value: d.id, label: `Pays ${d.name}` })), chosen, { blank: 'Not a debt payment' })}</select>`;
+  }
+
   function previewHtml() {
     if (!preview) return '';
     const c = preview.counts;
@@ -61,7 +70,7 @@ export function createImportView({ app, ui }) {
           <div class="fin-row-main">
             <span class="memory-item-title">${esc(r.description || r.raw.join(', '))}</span>
             <span class="fin-row-sub">Row ${r.row_number}${r.date ? ` · ${esc(r.date)}` : ''}${r.error ? ` · ${esc(r.error)}` : ''}</span>
-            ${usable ? `<div class="fin-preview-cat">${categorySelect(r)}
+            ${usable ? `<div class="fin-preview-cat">${categorySelect(r)}${debtSelect(r)}
               <button type="button" class="memory-toolbar-btn" data-remember="${r.row_number}" title="Always use this category for descriptions containing this text">Remember</button></div>` : ''}
           </div>
           ${r.amount_pence ? amountHtml(r.amount_pence, r.direction) : ''}
@@ -155,7 +164,7 @@ export function createImportView({ app, ui }) {
     wire(container);
   }
 
-  function resetPreview() { preview = null; overrides = {}; excluded = new Set(); }
+  function resetPreview() { preview = null; overrides = {}; payOverrides = {}; excluded = new Set(); }
 
   function wire(container) {
     const rerender = () => render(container);
@@ -221,6 +230,9 @@ export function createImportView({ app, ui }) {
     container.querySelectorAll('[data-row-cat]').forEach((sel) => sel.addEventListener('change', () => {
       overrides[sel.dataset.rowCat] = sel.value;
     }));
+    container.querySelectorAll('[data-row-debt]').forEach((sel) => sel.addEventListener('change', () => {
+      payOverrides[sel.dataset.rowDebt] = sel.value;
+    }));
     container.querySelectorAll('[data-row-include]').forEach((box) => box.addEventListener('change', () => {
       const n = Number(box.dataset.rowInclude);
       if (box.checked) excluded.delete(n); else excluded.add(n);
@@ -257,17 +269,21 @@ export function createImportView({ app, ui }) {
     const row = preview.rows.find((r) => r.row_number === rowNumber);
     const categoryId = overrides[rowNumber] || row.category_id;
     const category = app.categoryById(categoryId);
+    const liabilityId = rowNumber in payOverrides ? payOverrides[rowNumber] : (row.liability_id || '');
+    const debt = liabilityId ? app.itemById('liability', liabilityId) : null;
     const pattern = await ui.styledPrompt(
-      `Always file descriptions containing this text under "${category ? category.name : 'this category'}":`,
+      `Always file descriptions containing this text under "${category ? category.name : 'this category'}"${debt ? ` as a payment towards ${debt.name}` : ''}:`,
       { title: 'Remember category', defaultValue: row.description, confirmText: 'Remember' });
     if (!pattern || !String(pattern).trim()) return;
     try {
-      await app.createRule({ pattern: String(pattern).trim(), category_id: categoryId });
+      await app.createRule({ pattern: String(pattern).trim(), category_id: categoryId, liability_id: liabilityId || null });
       ui.showToast('Rule saved');
       const keep = { ...overrides };
+      const keepPay = { ...payOverrides };
       await runPreview(container);
       // Choices made by hand still win over the new rule.
       overrides = keep;
+      payOverrides = keepPay;
       render(container);
     } catch (err) {
       ui.showError(err.message);
@@ -293,7 +309,8 @@ export function createImportView({ app, ui }) {
     const btn = container.querySelector('[data-action="commit"]');
     if (btn) btn.disabled = true;
     try {
-      const result = await app.commitImport({ ...requestBody(), category_overrides: overrides, exclude_rows: [...excluded] });
+      const result = await app.commitImport({ ...requestBody(), category_overrides: overrides, exclude_rows: [...excluded],
+        liability_overrides: payOverrides });
       const dupes = result.skipped.filter((s) => s.reason === 'duplicate').length;
       ui.showToast(`Imported ${result.batch.imported_count} transaction${result.batch.imported_count === 1 ? '' : 's'}${dupes ? `, skipped ${dupes} duplicate${dupes === 1 ? '' : 's'}` : ''}`);
       file = null;

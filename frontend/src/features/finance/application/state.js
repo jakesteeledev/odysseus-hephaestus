@@ -143,12 +143,20 @@ export function createFinanceState({ api, storage, now }) {
     shiftMonth,
     goToMonth,
     setFilters,
-    addTransaction: (body, { contributionAssetId } = {}) => mutate(async () => {
+    addTransaction: (body, { contributionAssetId, paymentLiabilityId } = {}) => mutate(async () => {
       const tx = await api.createTransaction(body);
       storage.rememberAccount(body.account_id);
       if (contributionAssetId) await api.linkContribution(tx.id, contributionAssetId);
+      if (paymentLiabilityId) await api.linkPayment(tx.id, paymentLiabilityId);
       return tx;
     }),
+    linkPayment: (transactionId, liabilityId) => mutate(() => api.linkPayment(transactionId, liabilityId)),
+    loanDetails: (liabilityId) => api.loan(liabilityId),
+    setSchedule: (liabilityId, body) => mutate(() => api.setSchedule(liabilityId, body)),
+    deleteSchedule: (liabilityId) => mutate(() => api.deleteSchedule(liabilityId)),
+    setInterestRate: (liabilityId, rate) => mutate(() => api.setInterestRate(liabilityId, rate)),
+    addRepayment: (liabilityId, body) => mutate(() => api.addRepayment(liabilityId, body)),
+    deleteRepayment: (id) => mutate(() => api.deleteRepayment(id)),
     linkContribution: (transactionId, assetId) => mutate(() => api.linkContribution(transactionId, assetId)),
     itemById,
     createItem: (kind, body) => mutate(() => api.createItem(collectionOf(kind), body)),

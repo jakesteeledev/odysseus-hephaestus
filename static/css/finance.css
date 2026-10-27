@@ -98,6 +98,9 @@
 .fin-group-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; opacity: 0.75; padding: 0 2px; }
 .fin-static-row { cursor: default; }
 .fin-snapshot-add { align-items: center; }
+.fin-warning { font-size: 11px; padding: 6px 10px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent); color: var(--fg); }
+.fin-preview-cat { flex-wrap: wrap; }
 
 @media (max-width: 768px) {
   .fin-modal-content { width: 100%; }

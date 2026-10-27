@@ -5,6 +5,7 @@ import { createFinanceState } from './application/state.js';
 import { createEntryForm } from './ui/entryForm.js';
 import { createAccountsView } from './ui/accountsView.js';
 import { createItemView } from './ui/itemView.js';
+import { createLoanSection } from './ui/loanSection.js';
 import { createOverviewView } from './ui/overviewView.js';
 import { createMonthNav, createSummaryView, createTransactionsView } from './ui/transactionsView.js';
 import { createImportView } from './ui/importView.js';
@@ -33,7 +34,7 @@ const views = {
   overview: createOverviewView({
     app,
     accountsView: createAccountsView({ app, ui }),
-    itemView: createItemView({ app, ui, now }),
+    itemView: createItemView({ app, ui, now, loanSection: createLoanSection({ app, ui, now }) }),
   }),
   transactions: createTransactionsView({ app, entryForm, monthNav }),
   summary: createSummaryView({ app, monthNav }),

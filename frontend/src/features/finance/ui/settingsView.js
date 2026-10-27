@@ -70,20 +70,25 @@ export function createSettingsView({ app, ui, now }) {
 
   function rulesHtml() {
     const cats = app.state.categories.map((c) => ({ value: c.id, label: c.name }));
+    const debts = app.state.liabilities.filter((d) => !d.archived).map((d) => ({ value: d.id, label: d.name }));
+    const debtSelect = (selected, attrs) => (debts.length
+      ? `<select class="task-form-input" ${attrs} aria-label="Debt this pays">${optionsHtml(debts, selected || '', { blank: 'Not a debt payment' })}</select>` : '');
     const rows = rules.map((r) => `
       <div class="memory-item fin-row fin-rule-row" data-rule-id="${esc(r.id)}">
         <div class="fin-row-main"><span class="fin-row-sub">Description contains</span>
           <input class="task-form-input" data-rule-pattern value="${esc(r.pattern)}" maxlength="80" aria-label="Text to match"></div>
         <div class="fin-row-main"><span class="fin-row-sub">Category</span>
-          <select class="task-form-input" data-rule-category aria-label="Category">${optionsHtml(cats, r.category_id)}</select></div>
+          <select class="task-form-input" data-rule-category aria-label="Category">${optionsHtml(cats, r.category_id)}</select>
+          ${debtSelect(r.liability_id, 'data-rule-debt')}</div>
         <button type="button" class="memory-item-btn" data-delete-rule title="Delete rule" aria-label="Delete rule">&times;</button>
       </div>`).join('');
     return `
       <h3 class="fin-section-title">Categorisation rules</h3>
-      <p class="memory-desc">Applied when importing: a description containing the text (any case) gets the category. Longer matches win. Add rules here or with "Remember" in the import preview.</p>
+      <p class="memory-desc">Applied when importing: a description containing the text (any case) gets the category, and can count as a payment towards a debt. Longer matches win. Add rules here or with "Remember" in the import preview.</p>
       <form class="fin-form-row fin-rule-add" data-rule-form>
         <div class="fin-form-col"><input class="task-form-input" name="pattern" maxlength="80" placeholder="e.g. tesco" aria-label="Text to match"></div>
         <div class="fin-form-col"><select class="task-form-input" name="category_id" aria-label="Category">${optionsHtml(cats, '')}</select></div>
+        ${debts.length ? `<div class="fin-form-col">${debtSelect('', 'name="liability_id"')}</div>` : ''}
         <button type="submit" class="task-btn">Add rule</button>
       </form>
       <div class="memory-list fin-list">${rows || emptyHtml('No rules yet.')}</div>`;
@@ -148,7 +153,8 @@ export function createSettingsView({ app, ui, now }) {
       const pattern = ruleForm.pattern.value.trim();
       if (!pattern) return;
       try {
-        await app.createRule({ pattern, category_id: ruleForm.category_id.value });
+        await app.createRule({ pattern, category_id: ruleForm.category_id.value,
+          liability_id: ruleForm.liability_id ? (ruleForm.liability_id.value || null) : null });
         rules = await app.listRules();
         ui.showToast('Rule added');
         rerender();
@@ -161,6 +167,7 @@ export function createSettingsView({ app, ui, now }) {
       };
       row.querySelector('[data-rule-pattern]').addEventListener('change', (e) => { if (e.target.value.trim()) save({ pattern: e.target.value.trim() }); });
       row.querySelector('[data-rule-category]').addEventListener('change', (e) => save({ category_id: e.target.value }));
+      row.querySelector('[data-rule-debt]')?.addEventListener('change', (e) => save({ liability_id: e.target.value || null }));
       row.querySelector('[data-delete-rule]').addEventListener('click', async () => {
         try { await app.deleteRule(id); rules = await app.listRules(); ui.showToast('Rule deleted'); rerender(); } catch (err) { ui.showError(err.message); }
       });

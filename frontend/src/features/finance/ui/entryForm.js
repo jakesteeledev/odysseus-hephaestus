@@ -35,6 +35,11 @@ export function createEntryForm({ app, ui, now }) {
       && (!a.archived || a.id === existing?.contribution_asset_id));
   }
 
+  /** Liabilities a money-out payment can go towards. */
+  function debts(existing) {
+    return app.state.liabilities.filter((d) => !d.archived || d.id === existing?.payment_liability_id);
+  }
+
   /**
    * Render into `container`. `existing` is a transaction row to edit (or
    * null for a new entry). `onDone()` runs after a successful save/delete.
@@ -81,6 +86,12 @@ export function createEntryForm({ app, ui, now }) {
           <label class="task-form-label" for="fin-contribution">Contribution to (optional)</label>
           <select id="fin-contribution" class="task-form-input" name="contribution">${optionsHtml(
             contributionAssets(existing).map((a) => ({ value: a.id, label: a.name })), existing?.contribution_asset_id || '', { blank: 'Not a contribution' })}</select>
+        </div>` : ''}
+        ${debts(existing).length && !isTransfer ? `
+        <div data-show-out>
+          <label class="task-form-label" for="fin-payment">Payment towards (optional)</label>
+          <select id="fin-payment" class="task-form-input" name="payment">${optionsHtml(
+            debts(existing).map((d) => ({ value: d.id, label: d.name })), existing?.payment_liability_id || '', { blank: 'Not a debt payment' })}</select>
         </div>` : ''}
         <label class="task-form-label" for="fin-description">Description</label>
         <input id="fin-description" class="task-form-input" name="description" maxlength="200" autocomplete="off"
@@ -172,6 +183,10 @@ export function createEntryForm({ app, ui, now }) {
           if (!isTransfer && contribution !== (existing.contribution_asset_id || '')) {
             await app.linkContribution(existing.id, contribution || null);
           }
+          const payment = mode === 'out' ? (form.querySelector('#fin-payment')?.value || '') : '';
+          if (!isTransfer && payment !== (existing.payment_liability_id || '')) {
+            await app.linkPayment(existing.id, payment || null);
+          }
           ui.showToast('Saved');
         } else if (mode === 'transfer') {
           if (!toSel.value || toSel.value === accountSel.value) { throw new Error('Choose two different accounts'); }
@@ -180,7 +195,10 @@ export function createEntryForm({ app, ui, now }) {
         } else {
           const contribution = mode === 'out' ? (form.querySelector('#fin-contribution')?.value || '') : '';
           await app.addTransaction({ account_id: accountSel.value, date, amount, direction: mode,
-            category_id: catSel.value || null, description, notes }, { contributionAssetId: contribution || null });
+            category_id: catSel.value || null, description, notes }, {
+            contributionAssetId: contribution || null,
+            paymentLiabilityId: mode === 'out' ? (form.querySelector('#fin-payment')?.value || null) : null,
+          });
           ui.showToast(`Added ${mode === 'in' ? 'money in' : 'money out'}: ${formatPence(pence)}`);
         }
         onDone();
