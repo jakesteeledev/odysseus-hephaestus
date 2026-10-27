@@ -1590,6 +1590,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "account": {"type": "string", "description": "Optional account name, e.g. 'savings' (partial names are fine)."},
                     "category": {"type": "string", "description": "Optional category name for transactions, e.g. 'groceries'."},
                     "search": {"type": "string", "description": "Optional text to find in transaction descriptions."},
+                    "name": {"type": "string", "description": "Optional asset or liability name to focus on (assets/liabilities views), e.g. 'car' or 'mortgage'."},
                     "limit": {"type": "integer", "description": "How many transactions to return (default 10, max 50)."}
                 },
                 "required": []
@@ -1610,7 +1611,8 @@ FUNCTION_TOOL_SCHEMAS = [
                     "category": {"type": "string", "description": "Optional category name, e.g. 'Eating out'. Leave out if unsure."},
                     "description": {"type": "string", "description": "Short description, e.g. 'Lunch'."},
                     "date": {"type": "string", "description": "YYYY-MM-DD, 'today' (default) or 'yesterday'."},
-                    "notes": {"type": "string", "description": "Optional extra notes."}
+                    "notes": {"type": "string", "description": "Optional extra notes."},
+                    "towards": {"type": "string", "description": "Optional debt this pays off, e.g. 'mortgage' or 'car finance'."}
                 },
                 "required": ["amount"]
             }

@@ -225,6 +225,29 @@ def _item_line(item: dict) -> str:
     return text + (f" ({'; '.join(extras)})" if extras else "")
 
 
+def _loan_lines(loan: dict) -> list[str]:
+    lines = []
+    if loan.get("interest_rate_percent") is not None:
+        lines.append(f"Interest rate: {loan['interest_rate_percent']:g}%")
+    p = loan.get("projection")
+    if p and loan["balance_pence"] > 0:
+        if p.get("pays_off") is False:
+            lines.append("At the current payment this debt never pays off (payment is below the interest).")
+        elif p.get("payoff_date"):
+            lines.append(
+                f"Next payment {format_pence(p['monthly_payment_pence'])} on {p['next_payment_date']}; "
+                f"{p['remaining_payments']} payments left, paid off {p['payoff_date']}; "
+                f"interest still to pay {format_pence(p['interest_remaining_pence'])}"
+                + (f"; final payment {format_pence(p['final_payment_pence'])}"
+                   if (loan.get("schedule") or {}).get("balloon_pence") else ""))
+    if loan.get("total_paid_pence"):
+        lines.append(f"Paid so far {format_pence(loan['total_paid_pence'])}, of which interest "
+                     f"{format_pence(loan['interest_paid_pence'])}")
+    if loan.get("missed_payments"):
+        lines.append("Missed expected payment(s): " + ", ".join(loan["missed_payments"]))
+    return lines
+
+
 def _query(db, owner: str, view: str, args: dict) -> Dict:
     from src.finance import networth as nw
 
@@ -255,13 +278,28 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
     if view in ("assets", "liabilities"):
         kind = "asset" if view == "assets" else "liability"
         items = nw.list_items(db, owner, kind)
+        if _first(args, "name"):
+            match = match_name(args["name"], items)
+            if not match.ok:
+                shown = ", ".join(match.options[:15]) or "none yet"
+                word = "matches more than one" if match.status == "ambiguous" else "doesn't match any"
+                return _err(f"'{args['name']}' {word} {kind}: {shown}. Ask the user which one.")
+            items = [match.item]
+        if kind == "liability":
+            from src.finance.loans import loan_details
+
+            for item in items:
+                item["loan"] = loan_details(db, owner, item["id"])
         data[view] = items
         if not items:
             lines.append(f"No {view} recorded yet.")
         else:
             label = "Assets" if kind == "asset" else "Liabilities (owed)"
             lines.append(f"{label}: {format_pence(sum(i['value_pence'] for i in items))}")
-            lines += [f"- {_item_line(i)} [{i['type'].replace('_', ' ')}]" for i in items]
+            for i in items:
+                lines.append(f"- {_item_line(i)} [{i['type'].replace('_', ' ')}]")
+                if i.get("loan"):
+                    lines += [f"  {line}" for line in _loan_lines(i["loan"])]
         if kind == "liability":
             cards = [a for a in accounts if a["account_type"] == "credit_card"]
             if cards:
@@ -363,12 +401,37 @@ async def do_add_transaction(content, owner: Optional[str] = None) -> Dict:
                 category, error = _resolve(db, owner, "category", category_query)
                 if error:
                     return error
+            liability = None
+            towards = _first(args, "towards", "liability", "pays_off", "debt")
+            if towards is not None:
+                if direction != "out":
+                    return _err("Nothing saved. Only money going out can pay towards a debt.")
+                from src.finance import networth as nw
+
+                debts = nw.list_items(db, owner, "liability")
+                match = match_name(towards, debts)
+                if not match.ok:
+                    shown = ", ".join(match.options[:15]) or "none yet"
+                    if match.status == "ambiguous":
+                        return _err(f"Nothing saved. '{towards}' matches more than one debt: {shown}. "
+                                    "Ask the user which one.")
+                    return _err(f"Nothing saved. No debt called '{towards}'. Existing debts: {shown}. "
+                                "Ask the user which one, or leave it unlinked. Do not create one.")
+                liability = match.item
             tx = fin.create_transaction(
                 db, owner, account_id=account["id"], date=day, amount=amount, direction=direction,
                 category_id=category["id"] if category else None,
                 description=str(_first(args, "description", "desc", "name", default="")),
                 notes=str(_first(args, "notes", "note", default="")),
             )
+            owed_after = None
+            if liability is not None:
+                from src.finance.loans import balance as loan_balance, link_transaction_payment
+                from src.finance.models import FinanceLiability
+
+                link_transaction_payment(db, owner, tx.id, liability["id"])
+                row = db.query(FinanceLiability).filter(FinanceLiability.id == liability["id"]).first()
+                owed_after = loan_balance(db, owner, row)[0]
             category_name = category["name"] if category else fin.UNCATEGORISED
             balance = fin.account_balances(db, owner, [account["id"]])[account["id"]]
             saved = fin.transaction_to_dict(tx)  # read before commit expires the row
@@ -382,7 +445,9 @@ async def do_add_transaction(content, owner: Optional[str] = None) -> Dict:
     text = (f"{verb} recorded: {format_pence(saved['amount_pence'])} on {saved['date']}, "
             f"{account['name']}, {category_name}"
             + (f", \"{saved['description']}\"" if saved["description"] else "")
-            + f". {account['name']} balance is now {format_pence(balance)}.")
+            + f". {account['name']} balance is now {format_pence(balance)}."
+            + (f" Counted as a payment towards {liability['name']}; still owed {format_pence(owed_after)}."
+               if liability is not None else ""))
     return {"response": text, "data": saved, "exit_code": 0}
 
 

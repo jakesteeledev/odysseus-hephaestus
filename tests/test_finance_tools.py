@@ -355,3 +355,62 @@ def test_update_valuation_refuses_accounts_and_needs_a_value(items):
 def test_update_valuation_with_no_items(db_factory):
     result = run(tools.do_update_valuation, {"name": "pension", "value": "5"})
     assert result["exit_code"] == 1 and "no assets or liabilities yet" in result["error"]
+
+
+# ── v2 stage 2: loans in tools ─────────────────────────────────────────
+
+
+@pytest.fixture
+def car_loan(seeded, db_factory):
+    from src.finance import loans
+    from src.finance import networth as nw
+
+    db = db_factory()
+    car = nw.create_item(db, OWNER, "liability", name="Car finance", liability_type="loan", subtype="pcp")
+    loans.set_schedule(db, OWNER, car.id, start_date="2026-01-01", start_balance="12000", apr="0",
+                       term_months=24, payment_day=1)
+    loans.add_repayment(db, OWNER, car.id, amount="500", on="2026-02-01")
+    slc = nw.create_item(db, OWNER, "liability", name="Student loan", liability_type="student_loan")
+    nw.set_valuation(db, OWNER, "liability", slc.id, value="28000", on="2026-04-01")
+    ids = {"car": car.id, "slc": slc.id}
+    db.commit()
+    db.close()
+    return ids
+
+
+def test_liabilities_view_has_loan_details(car_loan, monkeypatch):
+    from src.finance import loans
+
+    monkeypatch.setattr(loans, "_today_for_owner", lambda: TODAY)
+    result = run(tools.do_query_finances, {"view": "liabilities", "name": "car"})
+    assert result["exit_code"] == 0
+    text = result["response"]
+    assert "Car finance: £11,500.00" in text and "Student loan" not in text
+    assert "Next payment £500.00" in text and "interest still to pay £0.00" in text
+    assert "Missed expected payment(s): 2026-10-01, 2026-09-01" in text
+    everything = run(tools.do_query_finances, {"view": "liabilities"})
+    assert "Student loan: £28,000.00" in everything["response"]
+
+
+def test_add_transaction_towards_a_debt(car_loan, db_factory):
+    from src.finance import loans
+    from src.finance.models import FinanceLiability
+
+    result = run(tools.do_add_transaction, {"amount": "500", "account": "monzo", "towards": "car",
+                                            "description": "Car finance"})
+    assert result["exit_code"] == 0, result
+    assert "Counted as a payment towards Car finance; still owed £11,000.00" in result["response"]
+    db = db_factory()
+    car = db.query(FinanceLiability).filter_by(id=car_loan["car"]).one()
+    assert loans.balance(db, OWNER, car)[0] == 1100000
+    db.close()
+
+
+def test_add_transaction_towards_unknown_or_income_saves_nothing(car_loan, db_factory):
+    unknown = run(tools.do_add_transaction, {"amount": "5", "account": "monzo", "towards": "mortgage"})
+    assert unknown["exit_code"] == 1 and "No debt called 'mortgage'" in unknown["error"]
+    income = run(tools.do_add_transaction, {"amount": "5", "account": "monzo", "direction": "in", "towards": "car"})
+    assert income["exit_code"] == 1 and "Only money going out" in income["error"]
+    db = db_factory()
+    assert not fin.list_transactions(db, OWNER, fin.TransactionFilter(start=TODAY))
+    db.close()

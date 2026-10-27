@@ -370,7 +370,7 @@ def project(schedule: FinanceLoanSchedule, current_balance: int, from_date: date
 
 
 def missed_payments(schedule: FinanceLoanSchedule, payments: list, today: date, *, months_back: int = 12) -> list[str]:
-    """Expected payment dates with no payment within a few days of them."""
+    """Expected payment dates (most recent first, up to six) with no payment within a few days."""
     if not monthly_payment_for(schedule):
         return []
     earliest = max(schedule.start_date, add_months(today, -months_back))
@@ -386,7 +386,7 @@ def missed_payments(schedule: FinanceLoanSchedule, payments: list, today: date, 
         elif due >= earliest:
             missed.append(due.isoformat())
         due = add_months(due, 1, schedule.payment_day)
-    return list(reversed(missed))
+    return list(reversed(missed))[:6]  # most recent six
 
 
 # ── Details for views and tools ─────────────────────────────────────────
