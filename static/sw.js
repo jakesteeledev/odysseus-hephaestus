@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v659-notes-reference';
+const CACHE_NAME = 'odysseus-v659-notes-reference-hephaestus-finance1';  // HEPHAESTUS PATCH: bumped for finance
 
 // KaTeX resolves these from its own stylesheet, so caching the CSS without them
 // gives offline math fallback glyphs instead of proper typesetting.
@@ -60,6 +60,7 @@ const PRECACHE = [
   '/static/css/documents-gallery-editor.css?v=20260929csssplit',
   '/static/css/email-calendar-notes-tasks.css?v=20260929csssplit',
   '/static/css/cookbook-research-memory-settings.css?v=20260929csssplit',
+  '/static/css/finance.css?v=20260929csssplit',  // HEPHAESTUS PATCH
   '/static/app.js?v=20260929csssplit',
   '/static/js/storage.js',
   '/static/js/appConfig.js',
@@ -194,6 +195,20 @@ const PRECACHE = [
 // Lazily-imported panel modules (js/panels.js). Not in index.html by design;
 // precached so the panel still opens with no network.
 const PANEL_PRECACHE = [
+  // HEPHAESTUS PATCH: finance tracker, imported by app.js on first open.
+  '/static/js/features/finance/domain/money.js',
+  '/static/js/features/finance/domain/csvHeader.js',
+  '/static/js/features/finance/infrastructure/http.js',
+  '/static/js/features/finance/infrastructure/storage.js',
+  '/static/js/features/finance/application/state.js',
+  '/static/js/features/finance/ui/dom.js',
+  '/static/js/features/finance/ui/entryForm.js',
+  '/static/js/features/finance/ui/accountsView.js',
+  '/static/js/features/finance/ui/transactionsView.js',
+  '/static/js/features/finance/ui/importView.js',
+  '/static/js/features/finance/ui/settingsView.js',
+  '/static/js/features/finance/ui/panel.js',
+  '/static/js/features/finance/index.js',
   // Image editor — galleryEditor.js and its js/editor/ graph.
   '/static/js/galleryEditor.js?v=20260909movepicklayer1',
   '/static/js/editor/ai-inpaint.js?v=20260708match1',

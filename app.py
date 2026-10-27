@@ -956,6 +956,11 @@ async def serve_notes(request: Request):
 async def serve_calendar(request: Request):
     return await serve_index(request)
 
+# HEPHAESTUS PATCH: finance tracker deep link.
+@app.get("/finance")
+async def serve_finance(request: Request):
+    return await serve_index(request)
+
 # Per-tool deep-link routes — all serve the same SPA, the JS auto-opens
 # the matching modal based on window.location.pathname. Each route also
 # gets a unique favicon + page title via inline script in index.html so

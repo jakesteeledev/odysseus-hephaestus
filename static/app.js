@@ -185,6 +185,7 @@ function initRailHoverLabels() {
     'rail-archive': 'Library',
     'rail-memory': 'Memory',
     'rail-notes': 'Notes',
+    'rail-finance': 'Finance',  // HEPHAESTUS PATCH
     'rail-skills': 'Skills',
     'rail-tasks': 'Tasks',
     'rail-theme': 'Theme',
@@ -1116,6 +1117,19 @@ function initializeEventListeners() {
       }
     });
   }
+  // HEPHAESTUS PATCH: finance tracker — loaded on first use.
+  const toolFinanceBtn = el('tool-finance-btn');
+  if (toolFinanceBtn) {
+    toolFinanceBtn.addEventListener('click', async () => {
+      try {
+        const finance = await import('./js/features/finance/index.js');
+        finance.toggleFinance();
+      } catch (err) {
+        console.error('Finance failed to load', err);
+        uiModule.showError('Finance could not be loaded');
+      }
+    });
+  }
   const notesNewNoteBtn = el('notes-new-note-btn');
   if (notesNewNoteBtn) {
     notesNewNoteBtn.addEventListener('click', (event) => {
@@ -1215,6 +1229,8 @@ function initializeEventListeners() {
       }
     },
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
+    // HEPHAESTUS PATCH: finance deep link.
+    '/finance':  () => import('./js/features/finance/index.js').then((m) => m.openFinance()).catch((err) => console.error('Finance failed to load', err)),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
     '/email':    () => {
       // Collapse the wide sidebar → icon rail (48px) so the user keeps
@@ -3838,6 +3854,7 @@ function startOdysseusApp() {
     'rail-archive':   'tool-library-btn',
     'rail-memory':    'tool-memory-btn',
     'rail-notes':     'tool-notes-btn',
+    'rail-finance':   'tool-finance-btn',  // HEPHAESTUS PATCH
     'rail-skills':    'tool-skills-btn',
     'rail-tasks':     'tool-tasks-btn',
     'rail-theme':     'tool-theme-btn',
