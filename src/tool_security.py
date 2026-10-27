@@ -119,6 +119,7 @@ PLAN_MODE_READONLY_TOOLS = {
     "search_chats",
     "list_models",
     "list_sessions",
+    "query_finances",  # HEPHAESTUS PATCH: read-only finance view
     # Read-only email tools. list_email_accounts must be here because the
     # bare/qualified alias gate in execute_tool_block works both ways: it has
     # a native function schema, so plan mode's schema-derived bare denylist
@@ -167,6 +168,7 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "manage_tasks", "manage_notes", "manage_endpoints", "manage_mcp",
     "manage_webhooks", "manage_tokens", "manage_settings", "manage_contact",
     "manage_calendar", "api_call", "app_api", "ui_control",
+    "add_transaction", "add_transfer",  # HEPHAESTUS PATCH: finance writes
     "send_email", "reply_to_email", "bulk_email", "delete_email",
     "archive_email", "mark_email_read", "unsubscribe_email", "block_sender",
     "manage_email_state",

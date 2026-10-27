@@ -135,6 +135,8 @@ _register(
         "tail_serve_output",
         "vault_get",
         "vault_search",
+        # HEPHAESTUS PATCH: finance read; descriptions can come from imported bank files.
+        "query_finances",
     },
     ToolEffect.READ_PRIVATE,
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
@@ -165,6 +167,9 @@ _register(
         "manage_tasks",
         "suggest_document",
         "todowrite",
+        # HEPHAESTUS PATCH: finance writes (gated like notes/calendar writes).
+        "add_transaction",
+        "add_transfer",
     },
     ToolEffect.WRITE_PRIVATE,
 )

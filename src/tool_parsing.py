@@ -401,6 +401,12 @@ _TOOL_NAME_MAP = {
     "notes": "manage_notes",
     "todo": "manage_notes",
     "todos": "manage_notes",
+    # HEPHAESTUS PATCH: finance tracker aliases.
+    "query_finances": "query_finances",
+    "finances": "query_finances",
+    "finance": "query_finances",
+    "add_transaction": "add_transaction",
+    "add_transfer": "add_transfer",
     "manage_bg_jobs": "manage_bg_jobs",
     "bg_jobs": "manage_bg_jobs",
     "background_jobs": "manage_bg_jobs",

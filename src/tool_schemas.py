@@ -1574,6 +1574,66 @@ FUNCTION_TOOL_SCHEMAS = [
             }
         }
     },
+    # HEPHAESTUS PATCH: finance tracker tools. Kept small for local models.
+    {
+        "type": "function",
+        "function": {
+            "name": "query_finances",
+            "description": "Read the user's own money records (GBP): net worth, account balances, money in/out and spending by category, and recent transactions. Use for questions like 'what's my net worth', 'how much did I spend this month', 'what's in my savings'. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "view": {"type": "string", "enum": ["overview", "net_worth", "balances", "summary", "transactions"],
+                             "description": "overview (default) = net worth, balances and this month's totals; net_worth; balances = per account; summary = money in/out/net and spending by category for a period; transactions = recent entries."},
+                    "start": {"type": "string", "description": "Period start, YYYY-MM-DD (summary/transactions). Default: first day of this month."},
+                    "end": {"type": "string", "description": "Period end, YYYY-MM-DD, inclusive. Default: last day of this month."},
+                    "account": {"type": "string", "description": "Optional account name, e.g. 'savings' (partial names are fine)."},
+                    "category": {"type": "string", "description": "Optional category name for transactions, e.g. 'groceries'."},
+                    "search": {"type": "string", "description": "Optional text to find in transaction descriptions."},
+                    "limit": {"type": "integer", "description": "How many transactions to return (default 10, max 50)."}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_transaction",
+            "description": "Record money spent or received on one of the user's existing finance accounts (GBP). Use the user's words for account and category; if the tool says a name is ambiguous or unknown, ask the user. Never invent accounts or categories.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "string", "description": "Amount in pounds, e.g. '12.50'."},
+                    "direction": {"type": "string", "enum": ["out", "in"], "description": "out = money spent (default), in = money received."},
+                    "account": {"type": "string", "description": "Account name, e.g. 'current' or 'Monzo'."},
+                    "category": {"type": "string", "description": "Optional category name, e.g. 'Eating out'. Leave out if unsure."},
+                    "description": {"type": "string", "description": "Short description, e.g. 'Lunch'."},
+                    "date": {"type": "string", "description": "YYYY-MM-DD, 'today' (default) or 'yesterday'."},
+                    "notes": {"type": "string", "description": "Optional extra notes."}
+                },
+                "required": ["amount"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_transfer",
+            "description": "Move money between two of the user's own finance accounts (GBP), e.g. current to savings. Not counted as income or spending.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from_account": {"type": "string", "description": "Account the money leaves."},
+                    "to_account": {"type": "string", "description": "Account the money goes into."},
+                    "amount": {"type": "string", "description": "Amount in pounds, e.g. '200'."},
+                    "date": {"type": "string", "description": "YYYY-MM-DD or 'today' (default)."},
+                    "description": {"type": "string", "description": "Optional description."}
+                },
+                "required": ["from_account", "to_account", "amount"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
