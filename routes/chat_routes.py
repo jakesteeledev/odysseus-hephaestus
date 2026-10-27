@@ -16,6 +16,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from core.models import ChatMessage
+# HEPHAESTUS PATCH: finance tracker tool list.
+from src.finance.routing import FINANCE_TOOLS
 from src.request_models import ChatRequest
 from src.llm_core import (
     _normalize_http_status,
@@ -3460,7 +3462,7 @@ def setup_chat_routes(
                 "send_email", "reply_to_email",
                 "manage_notes", "manage_calendar", "manage_tasks",
                 "api_call",
-                "query_finances", "add_transaction", "add_transfer",  # HEPHAESTUS PATCH
+                *FINANCE_TOOLS,  # HEPHAESTUS PATCH
             })
             _web_workspace_output = bool(
                 workspace
@@ -4642,7 +4644,7 @@ def setup_chat_routes(
                             "calendar": {"manage_calendar"},
                             "notes": {"manage_notes", "manage_tasks"},
                             # HEPHAESTUS PATCH: finance tracker tools.
-                            "finance": {"query_finances", "add_transaction", "add_transfer"},
+                            "finance": set(FINANCE_TOOLS),
                         }.get(_tool_intent.category, set())
                         if _typed_forced_tools:
                             if _forced_tools is None:

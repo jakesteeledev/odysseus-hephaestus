@@ -1579,12 +1579,12 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "query_finances",
-            "description": "Read the user's own money records (GBP): net worth, account balances, money in/out and spending by category, and recent transactions. Use for questions like 'what's my net worth', 'how much did I spend this month', 'what's in my savings'. Read-only.",
+            "description": "Read the user's own money records (GBP): net worth (assets minus liabilities), account balances, assets and liabilities, money in/out and spending by category, and recent transactions. Use for questions like 'what's my net worth', 'how much do I owe', 'what's my pension worth', 'how much did I spend this month'. Read-only.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "view": {"type": "string", "enum": ["overview", "net_worth", "balances", "summary", "transactions"],
-                             "description": "overview (default) = net worth, balances and this month's totals; net_worth; balances = per account; summary = money in/out/net and spending by category for a period; transactions = recent entries."},
+                    "view": {"type": "string", "enum": ["overview", "net_worth", "balances", "assets", "liabilities", "summary", "transactions"],
+                             "description": "overview (default) = net worth breakdown and this month's totals; net_worth = assets minus liabilities by type; balances = per account; assets = property/investments/pensions/vehicles with values; liabilities = mortgage/loans/student loan/BNPL with balances owed; summary = money in/out/net and spending by category for a period; transactions = recent entries."},
                     "start": {"type": "string", "description": "Period start, YYYY-MM-DD (summary/transactions). Default: first day of this month."},
                     "end": {"type": "string", "description": "Period end, YYYY-MM-DD, inclusive. Default: last day of this month."},
                     "account": {"type": "string", "description": "Optional account name, e.g. 'savings' (partial names are fine)."},
@@ -1631,6 +1631,23 @@ FUNCTION_TOOL_SCHEMAS = [
                     "description": {"type": "string", "description": "Optional description."}
                 },
                 "required": ["from_account", "to_account", "amount"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_valuation",
+            "description": "Record a new value for one of the user's assets (house, ISA, pension, car...) or a new balance owed on a liability (mortgage, loan, student loan, BNPL). If the tool says a name is ambiguous or unknown, ask the user; never invent one.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Asset or liability name, e.g. 'ISA' or 'mortgage' (partial names are fine)."},
+                    "value": {"type": "string", "description": "New value, or balance owed, in pounds, e.g. '12500'."},
+                    "date": {"type": "string", "description": "YYYY-MM-DD or 'today' (default)."},
+                    "note": {"type": "string", "description": "Optional note, e.g. 'from statement'."}
+                },
+                "required": ["name", "value"]
             }
         }
     },

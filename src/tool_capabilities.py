@@ -170,6 +170,7 @@ _register(
         # HEPHAESTUS PATCH: finance writes (gated like notes/calendar writes).
         "add_transaction",
         "add_transfer",
+        "update_valuation",
     },
     ToolEffect.WRITE_PRIVATE,
 )

@@ -24,7 +24,7 @@ from src.tools._common import _parse_tool_args
 
 logger = logging.getLogger(__name__)
 
-QUERY_VIEWS = ("overview", "net_worth", "balances", "summary", "transactions")
+QUERY_VIEWS = ("overview", "net_worth", "balances", "assets", "liabilities", "summary", "transactions")
 _DEFAULT_TX_LIMIT = 10
 _MAX_TX_LIMIT = 50
 
@@ -172,7 +172,10 @@ async def do_query_finances(content, owner: Optional[str] = None) -> Dict:
     view = str(_first(args, "view", "action", "type", default="overview")).strip().lower().replace(" ", "_").replace("-", "_")
     view = {"networth": "net_worth", "worth": "net_worth", "total": "net_worth", "balance": "balances",
             "accounts": "balances", "spending": "summary", "totals": "summary", "breakdown": "summary",
-            "recent": "transactions", "list": "transactions", "transaction": "transactions"}.get(view, view)
+            "recent": "transactions", "list": "transactions", "transaction": "transactions",
+            "asset": "assets", "investments": "assets", "pensions": "assets", "property": "assets",
+            "liability": "liabilities", "debts": "liabilities", "debt": "liabilities", "loans": "liabilities",
+            "owe": "liabilities", "mortgage": "liabilities"}.get(view, view)
     if view not in QUERY_VIEWS:
         return _err(f"view must be one of: {', '.join(QUERY_VIEWS)}")
     try:
@@ -188,23 +191,82 @@ async def do_query_finances(content, owner: Optional[str] = None) -> Dict:
         return _err(f"Could not read finances: {exc}")
 
 
+def _net_worth_text(worth: dict) -> list[str]:
+    lines = [
+        f"Net worth: {format_pence(worth['net_worth_pence'])}",
+        f"Assets: {format_pence(worth['assets_total_pence'])}",
+    ]
+    for group in worth["assets"]:
+        lines.append(f"- {group['label']}: {format_pence(group['total_pence'])}")
+        lines += [f"  - {_item_line(i)}" for i in group["items"]]
+    lines.append(f"Liabilities (owed): {format_pence(worth['liabilities_total_pence'])}")
+    for group in worth["liabilities"]:
+        lines.append(f"- {group['label']}: {format_pence(group['total_pence'])}")
+        lines += [f"  - {_item_line(i)}" for i in group["items"]]
+    if not worth["liabilities"]:
+        lines.append("- none recorded")
+    return lines
+
+
+def _item_line(item: dict) -> str:
+    text = f"{item['name']}: {format_pence(item['value_pence'])}"
+    extras = []
+    if item.get("value_date"):
+        extras.append(f"as of {item['value_date']}")
+    elif item.get("kind") in ("asset", "liability"):
+        extras.append("no value recorded yet")
+    if "gain_pence" in item:
+        extras.append(f"contributed {format_pence(item['contributions_pence'])}, "
+                      f"gain {format_pence(item['gain_pence'])}")
+    if "equity_pence" in item and item.get("mortgages"):
+        extras.append(f"equity {format_pence(item['equity_pence'])}")
+    if item.get("archived"):
+        extras.append("archived")
+    return text + (f" ({'; '.join(extras)})" if extras else "")
+
+
 def _query(db, owner: str, view: str, args: dict) -> Dict:
+    from src.finance import networth as nw
+
     overview = fin.accounts_overview(db, owner)
     accounts = overview["accounts"]
     data: dict = {"view": view, "currency": "GBP"}
     lines: list[str] = []
-    if not accounts and view != "transactions":
-        return {"response": "The user has no finance accounts yet. They can add accounts in the Finance window.",
+    has_items = bool(nw.list_items(db, owner, "asset") or nw.list_items(db, owner, "liability"))
+    if not accounts and not has_items and view not in ("transactions", "assets", "liabilities"):
+        return {"response": "The user has no finance accounts, assets or liabilities yet. They can add them "
+                            "in the Finance window.",
                 "data": {"view": view, "accounts": [], "net_worth_pence": 0}, "exit_code": 0}
 
-    if view in ("overview", "net_worth", "balances"):
+    if view in ("overview", "net_worth"):
+        worth = nw.net_worth(db, owner)
+        data["net_worth"] = worth
+        data["net_worth_pence"] = worth["net_worth_pence"]
+        lines += _net_worth_text(worth)
+
+    if view == "balances":
         data["net_worth_pence"] = overview["total_pence"]
         data["accounts"] = [{"name": a["name"], "type": a["account_type"], "balance_pence": a["balance_pence"],
                              "balance": format_pence(a["balance_pence"])} for a in accounts]
-        lines.append(f"Net worth (all active accounts): {format_pence(overview['total_pence'])}")
-        if view != "net_worth" or len(accounts) > 1:
-            lines.append("Balances:")
-            lines += _balances_text(accounts)
+        lines.append(f"Total across active accounts: {format_pence(overview['total_pence'])}")
+        lines.append("Balances:")
+        lines += _balances_text(accounts)
+
+    if view in ("assets", "liabilities"):
+        kind = "asset" if view == "assets" else "liability"
+        items = nw.list_items(db, owner, kind)
+        data[view] = items
+        if not items:
+            lines.append(f"No {view} recorded yet.")
+        else:
+            label = "Assets" if kind == "asset" else "Liabilities (owed)"
+            lines.append(f"{label}: {format_pence(sum(i['value_pence'] for i in items))}")
+            lines += [f"- {_item_line(i)} [{i['type'].replace('_', ' ')}]" for i in items]
+        if kind == "liability":
+            cards = [a for a in accounts if a["account_type"] == "credit_card"]
+            if cards:
+                lines.append("Credit cards (owed): " + ", ".join(
+                    f"{a['name']} {format_pence(-a['balance_pence'])}" for a in cards))
 
     if view in ("overview", "summary"):
         account_id = None
@@ -366,3 +428,67 @@ async def do_add_transfer(content, owner: Optional[str] = None) -> Dict:
             f"{format_pence(balances[source['id']])}, {target['name']} {format_pence(balances[target['id']])}. "
             "Transfers are not counted as income or spending.")
     return {"response": text, "data": {"transfer_id": saved["transfer_id"]}, "exit_code": 0}
+
+
+# ── update_valuation ────────────────────────────────────────────────────
+
+
+async def do_update_valuation(content, owner: Optional[str] = None) -> Dict:
+    """Set a new value (asset) or balance owed (liability), dated today by default."""
+    from src.finance import networth as nw
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return _err("Invalid JSON arguments")
+    try:
+        owner = fin.resolve_owner(owner)
+        name = _first(args, "name", "item", "asset", "liability")
+        value = _first(args, "value", "balance", "amount")
+        if name is None:
+            return _err("Nothing saved. Which asset or liability? Ask the user.")
+        if value is None:
+            return _err("Nothing saved. What is the new value or balance? Ask the user.")
+        kind_hint = str(_first(args, "kind", default="")).strip().lower()
+        day = _parse_day(_first(args, "date"), field="date")
+        with _session() as db:
+            candidates = []
+            for kind in ("asset", "liability"):
+                if kind_hint and kind_hint != kind:
+                    continue
+                candidates += nw.list_items(db, owner, kind)
+            if not candidates:
+                return _err("Nothing saved. There are no assets or liabilities yet. Ask the user to add it "
+                            "in the Finance window first. Do not invent one.")
+            match = match_name(name, candidates)
+            if not match.ok:
+                accounts = fin.list_accounts(db, owner)
+                if match.status == "missing" and match_name(name, accounts).ok:
+                    return _err(f"Nothing saved. '{name}' is an account; its balance comes from its "
+                                "transactions. Use add_transaction or add_transfer instead.")
+                labelled = [f"{c['name']} ({c['kind']})" for c in candidates if c["name"] in match.options]
+                if match.status == "ambiguous":
+                    return _err(f"Nothing saved. '{name}' matches more than one item: {', '.join(labelled)}. "
+                                "Ask the user which they mean.")
+                return _err(f"Nothing saved. No asset or liability called '{name}'. Existing: "
+                            f"{', '.join(labelled[:15])}. Ask the user which one, or to add it in the "
+                            "Finance window. Do not create one.")
+            item = match.item
+            previous = nw.latest_valuation(db, owner, item["kind"], item["id"])
+            before = (previous.value_pence, previous.date.isoformat()) if previous else None
+            snap = nw.set_valuation(db, owner, item["kind"], item["id"], value=_amount_text(value), on=day,
+                                    note=str(_first(args, "note", default="")))
+            saved = nw.valuation_to_dict(snap)
+            worth = nw.net_worth(db, owner)["net_worth_pence"]
+            db.commit()
+    except fin.FinanceError as exc:
+        return _err(f"Nothing saved. {exc}")
+    except Exception as exc:  # pragma: no cover - unexpected storage failure
+        logger.exception("update_valuation failed")
+        return _err(f"Nothing saved: {exc}")
+    what = "value" if item["kind"] == "asset" else "balance owed"
+    text = f"Updated {item['name']} {what} to {format_pence(saved['value_pence'])} on {saved['date']}"
+    if before:
+        text += f" (was {format_pence(before[0])} on {before[1]})"
+    text += f". Net worth is now {format_pence(worth)}."
+    return {"response": text, "data": saved, "exit_code": 0}

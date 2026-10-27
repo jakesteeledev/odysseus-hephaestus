@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-FINANCE_TOOLS = frozenset({"query_finances", "add_transaction", "add_transfer"})
+FINANCE_TOOLS = frozenset({"query_finances", "add_transaction", "add_transfer", "update_valuation"})
 
 _MONEY_AMOUNT = r"(?:£\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s*(?:pounds?|quid|gbp)\b)"
 
@@ -27,18 +27,32 @@ FINANCE_FAMILY_PATTERN = (
     r"|\bmy\s+(?:budget|transactions?|accounts)\b|\b(?:recent|last|latest)\s+transactions\b"
     rf"|{_MONEY_AMOUNT}"
     r"|\btransfer(?:red)?\b.{0,40}\b(?:to|into|from)\s+(?:my\s+)?(?:savings|current|isa|credit\s+card)\b"
+    # v2: assets and liabilities.
+    r"|\b(?:assets|liabilit(?:y|ies)|equity|mortgages?|loans?|debts?|owe|owed|pensions?|investments|"
+    r"student\s+loans?|klarna|clearpay|bnpl|crypto)\b"
+    r"|\bmy\s+(?:property|house|home|flat|car|shares|isa|sipp)\b|\b(?:house|property|car|home)\s+value\b"
+    r"|\bshares\s+in\b|\bworth\s+(?:now|£|\d)|\bwhat\b.{0,30}\bworth\b"
 )
 FINANCE_FAMILY_RE = re.compile(FINANCE_FAMILY_PATTERN, re.I)
 
 _ASK = r"\b(?:what(?:'s|\s+is|\s+are|\s+was)?|show|tell\s+me|check|give\s+me|list)\b"
+# A message about email ("show me the email about my pension") stays with email.
+_NOT_EMAIL = r"^(?!.*\b(?:e-?mails?|inbox|mail|messages?)\b)"
+_V2_NOUNS = (r"assets|liabilit(?:y|ies)|debts?|loans?|mortgage|pensions?|isas?|investments|shares|crypto|"
+             r"property|equity|student\s+loan")
 
 FINANCE_INTENT_PATTERNS = tuple(
-    (reason, re.compile(pattern, re.I))
+    (reason, re.compile(_NOT_EMAIL + r"(?s:.*?)" + pattern, re.I))
     for reason, pattern in (
         ("net worth question", r"\bnet\s*worth\b"),
         ("finance lookup question",
          rf"{_ASK}.{{0,40}}\bmy\s+(?:balances?|finances|savings|spending|outgoings|income|budget|"
-         r"bank\s+accounts?|credit\s+cards?|transactions)\b"),
+         rf"bank\s+accounts?|credit\s+cards?|transactions|{_V2_NOUNS})\b"),
+        ("worth question", r"\b(?:what(?:'s|\s+is)|how\s+much\s+is)\s+(?:my|our)\s+[\w\s]{1,30}?\bworth\b"),
+        ("how much owed question", r"\bhow\s+much\b.{0,30}\b(?:owe|owed|left\s+on|outstanding)\b"),
+        ("update value request",
+         rf"\b(?:update|set|change)\b.{{0,50}}\b(?:to|at)\s+{_MONEY_AMOUNT}"),
+        ("new value statement", rf"\bmy\b.{{0,40}}\b(?:is|are)\s+(?:now\s+)?(?:worth|at)\s+(?:about\s+)?{_MONEY_AMOUNT}"),
         ("how much spent/earned question",
          r"\bhow\s+much\b.{0,40}\b(?:did|have|do|am|was)\s+i\b.{0,30}"
          r"\b(?:spen[dt]|earn(?:ed)?|save[d]?|owe|have|got|left|paid|make|made)\b"),
@@ -55,6 +69,9 @@ FINANCE_KEYWORDS = (
     "finance", "finances", "money", "net worth", "balance", "balances", "account balance",
     "spent", "spend", "spending", "income", "earned", "salary", "budget", "transaction",
     "transactions", "transfer", "savings", "credit card", "outgoings", "how much", "pounds",
+    # v2
+    "assets", "liabilities", "worth", "equity", "mortgage", "loan", "debt", "owe", "pension", "isa",
+    "investments", "shares", "crypto", "house value", "car value", "student loan", "klarna",
 )
 
 

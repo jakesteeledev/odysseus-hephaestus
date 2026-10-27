@@ -77,6 +77,7 @@ _COMMON_TOOL_NAMES = {
     "query_finances",
     "add_transaction",
     "add_transfer",
+    "update_valuation",
     "api_call",
     "app_api",
     "archive_email",

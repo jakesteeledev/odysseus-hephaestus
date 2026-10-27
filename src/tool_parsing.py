@@ -407,6 +407,7 @@ _TOOL_NAME_MAP = {
     "finance": "query_finances",
     "add_transaction": "add_transaction",
     "add_transfer": "add_transfer",
+    "update_valuation": "update_valuation",
     "manage_bg_jobs": "manage_bg_jobs",
     "bg_jobs": "manage_bg_jobs",
     "background_jobs": "manage_bg_jobs",

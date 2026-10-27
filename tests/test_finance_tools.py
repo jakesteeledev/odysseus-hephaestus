@@ -104,21 +104,22 @@ def test_exact_name_beats_partial_matches():
 # ── query_finances ──────────────────────────────────────────────────────
 
 
-def test_net_worth_is_total_of_active_accounts(seeded):
+def test_net_worth_is_assets_minus_liabilities(seeded):
     result = run(tools.do_query_finances, {"view": "net_worth"})
     assert result["exit_code"] == 0
-    # current 1000+2500-45.20-80-300, savings 5000+300, card -250-9.99; archived cash excluded.
-    expected = (100000 + 250000 - 4520 - 8000 - 30000) + (500000 + 30000) + (-25000 - 999)
+    # current 1000+2500-45.20-80-300, savings 5000+300, card -250-9.99 (a liability),
+    # plus the archived cash account, which still holds £40 (archived counts until zero).
+    expected = (100000 + 250000 - 4520 - 8000 - 30000) + (500000 + 30000) + 4000 - (25000 + 999)
     assert result["data"]["net_worth_pence"] == expected
-    assert "Net worth (all active accounts): £8,114.81" in result["response"]
-    assert "Old Cash" not in result["response"]
+    assert "Net worth: £8,154.81" in result["response"]
+    assert "Credit cards: £259.99" in result["response"] and "Old Cash: £40.00 (archived)" in result["response"]
 
 
 def test_overview_with_no_arguments_answers_net_worth_and_month(seeded):
     result = asyncio.run(tools.do_query_finances("", owner=OWNER))
     assert result["exit_code"] == 0
     text = result["response"]
-    assert "Net worth" in text and "Monzo Current (current): £3,074.80" in text
+    assert "Net worth" in text and "Monzo Current: £3,074.80" in text
     assert "Period 2026-10-01 to 2026-10-31" in text
     assert "Money in: £2,500.00" in text and "Money out: £55.19" in text
 
@@ -168,7 +169,7 @@ def test_query_with_ambiguous_account_lists_options(seeded, db_factory):
 
 def test_query_with_no_accounts(db_factory):
     result = run(tools.do_query_finances, {"view": "net_worth"})
-    assert result["exit_code"] == 0 and "no finance accounts yet" in result["response"]
+    assert result["exit_code"] == 0 and "no finance accounts" in result["response"]
 
 
 def test_bad_view_is_rejected(seeded):
@@ -177,7 +178,7 @@ def test_bad_view_is_rejected(seeded):
 
 def test_users_only_see_their_own_finances(seeded):
     result = run(tools.do_query_finances, {"view": "net_worth"}, owner="bob")
-    assert "no finance accounts yet" in result["response"]
+    assert "no finance accounts" in result["response"]
 
 
 def test_internal_callers_are_refused(seeded):
@@ -275,3 +276,82 @@ def test_add_transfer_needs_two_distinct_known_accounts(seeded):
     assert same["exit_code"] == 1 and "two different accounts" in same["error"]
     unknown = run(tools.do_add_transfer, {"from_account": "monzo", "to_account": "isa", "amount": 5})
     assert unknown["exit_code"] == 1 and "No account called 'isa'" in unknown["error"]
+
+
+# ── v2: assets, liabilities and update_valuation ───────────────────────
+
+
+@pytest.fixture
+def items(seeded, db_factory):
+    from src.finance import networth as nw
+
+    db = db_factory()
+    house = nw.create_item(db, OWNER, "asset", name="Home", asset_type="property", value="300000",
+                           value_date="2026-01-01")
+    nw.create_item(db, OWNER, "asset", name="Vanguard ISA", asset_type="investment", value="12000",
+                   value_date="2026-09-30")
+    nw.create_item(db, OWNER, "asset", name="Aviva pension", asset_type="pension", value="45000")
+    nw.create_item(db, OWNER, "liability", name="Home mortgage", liability_type="mortgage", value="180000",
+                   linked_asset_id=house.id, value_date="2026-01-01")
+    nw.create_item(db, OWNER, "liability", name="Car finance", liability_type="loan", subtype="pcp",
+                   value="8000", value_date="2026-09-01")
+    db.commit()
+    db.close()
+
+
+def test_net_worth_breakdown_includes_assets_and_liabilities(items):
+    result = run(tools.do_query_finances, {"view": "net_worth"})
+    text = result["response"]
+    worth = result["data"]["net_worth"]
+    assert worth["assets_total_pence"] == 841480 + 30000000 + 1200000 + 4500000
+    assert worth["liabilities_total_pence"] == 25999 + 18000000 + 800000
+    assert "- Property: £300,000.00" in text and "equity £120,000.00" in text
+    assert "- Mortgages: £180,000.00" in text and "Car finance: £8,000.00 (as of 2026-09-01)" in text
+
+
+def test_assets_and_liabilities_views(items):
+    assets = run(tools.do_query_finances, {"view": "assets"})
+    assert {i["name"] for i in assets["data"]["assets"]} == {"Home", "Vanguard ISA", "Aviva pension"}
+    debts = run(tools.do_query_finances, {"view": "debts"})
+    assert debts["data"]["view"] == "liabilities"
+    assert "Liabilities (owed): £188,000.00" in debts["response"]
+    assert "Credit cards (owed): Amex £259.99" in debts["response"]
+
+
+def test_update_valuation_by_fuzzy_name(items):
+    result = run(tools.do_update_valuation, {"name": "isa", "value": "12,500"})
+    assert result["exit_code"] == 0, result
+    assert result["response"].startswith("Updated Vanguard ISA value to £12,500.00 on 2026-10-27 "
+                                         "(was £12,000.00 on 2026-09-30)")
+    debt = run(tools.do_update_valuation, {"name": "car", "value": "7650", "note": "statement"})
+    assert debt["exit_code"] == 0 and "Car finance balance owed to £7,650.00" in debt["response"]
+
+
+def test_update_valuation_ambiguous_and_unknown(items, db_factory):
+    from src.finance import networth as nw
+
+    exact = run(tools.do_update_valuation, {"name": "home", "value": "1"})
+    # "Home" matches the asset exactly, so it wins over "Home mortgage".
+    assert exact["exit_code"] == 0 and "Updated Home value" in exact["response"]
+    db = db_factory()
+    nw.create_item(db, OWNER, "asset", name="Vanguard SIPP", asset_type="pension")
+    db.commit()
+    db.close()
+    both = run(tools.do_update_valuation, {"name": "vanguard", "value": "1"})
+    assert both["exit_code"] == 1 and "matches more than one item" in both["error"]
+    assert "Vanguard ISA (asset)" in both["error"] and "Vanguard SIPP (asset)" in both["error"]
+    missing = run(tools.do_update_valuation, {"name": "boat", "value": "1"})
+    assert missing["exit_code"] == 1 and "No asset or liability called 'boat'" in missing["error"]
+    assert "Do not create one" in missing["error"]
+
+
+def test_update_valuation_refuses_accounts_and_needs_a_value(items):
+    account = run(tools.do_update_valuation, {"name": "Monzo Current", "value": "5"})
+    assert account["exit_code"] == 1 and "is an account" in account["error"]
+    assert "What is the new value" in run(tools.do_update_valuation, {"name": "isa"})["error"]
+    assert run(tools.do_update_valuation, {"name": "isa", "value": "abc"})["exit_code"] == 1
+
+
+def test_update_valuation_with_no_items(db_factory):
+    result = run(tools.do_update_valuation, {"name": "pension", "value": "5"})
+    assert result["exit_code"] == 1 and "no assets or liabilities yet" in result["error"]
