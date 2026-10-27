@@ -280,6 +280,10 @@
       "deployment": "js/features/finance/ui/upcomingView.js"
     },
     {
+      "source": "features/finance/ui/budgetsView.js",
+      "deployment": "js/features/finance/ui/budgetsView.js"
+    },
+    {
       "source": "features/finance/index.js",
       "deployment": "js/features/finance/index.js",
       "legacyImports": [

@@ -104,6 +104,18 @@
 .fin-occurrence-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .fin-make-recurring { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
 .fin-make-recurring select { width: auto; }
+.fin-budget-row { align-items: center; }
+.fin-budget-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.fin-budget-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin: 4px 0;
+  background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.fin-budget-fill { display: block; height: 100%; }
+.fin-budget-committed { display: block; height: 100%; opacity: 0.35; }
+.fin-budget-ok { background: var(--color-success); }
+.fin-budget-warning { background: var(--color-warning); }
+.fin-budget-over { background: var(--color-error); }
+.fin-budget-label { background: none; font-weight: 600; }
+.fin-budget-label.fin-budget-warning { color: var(--color-warning); }
+.fin-budget-label.fin-budget-over { color: var(--color-error); }
 
 @media (max-width: 768px) {
   .fin-modal-content { width: 100%; }

@@ -10,6 +10,7 @@ const TABS = [
   { id: 'overview', label: 'Overview', icon: ICONS.accounts },
   { id: 'transactions', label: 'Transactions', icon: ICONS.list },
   { id: 'upcoming', label: 'Upcoming', icon: ICONS.upcoming },
+  { id: 'budgets', label: 'Budgets', icon: ICONS.budgets },
   { id: 'insights', label: 'Insights', icon: ICONS.summary },
   { id: 'import', label: 'Import', icon: ICONS.upload },
   { id: 'settings', label: 'Settings', icon: ICONS.settings },
@@ -92,6 +93,7 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
       case 'overview': views.overview.render(el); break;
       case 'transactions': views.transactions.render(el); break;
       case 'upcoming': views.upcoming.render(el); break;
+      case 'budgets': views.budgets.render(el); break;
       case 'insights': views.summary.render(el); break;
       case 'add': views.add(el, () => renderTab()); break;  // stay ready for the next entry
       case 'import': views.import.render(el); break;
@@ -107,6 +109,8 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
     if (!app.state.loaded || ['transactions', 'insights'].includes(tab)) renderTab();
     // The overview holds editors; only redraw it when none is open.
     else if (tab === 'overview' && !views.overview.isEditing()) renderTab();
+    // Budgets follow the month navigation.
+    else if (tab === 'budgets' && !views.budgets.isEditing()) renderTab();
   }
 
   function switchTab(next) {
@@ -117,6 +121,7 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
     views.overview.reset();
     views.transactions.reset();
     views.upcoming.reset();
+    views.budgets.reset();
     renderTab();
   }
 

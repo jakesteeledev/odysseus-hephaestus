@@ -166,6 +166,8 @@ export function createFinanceState({ api, storage, now }) {
     deleteRecurring: (id) => mutate(() => api.deleteRecurring(id)),
     occurrence: (id, action, body) => mutate(() => api.occurrence(id, action, body)),
     makeRecurring: (transactionId, body) => mutate(() => api.makeRecurring(transactionId, body)),
+    budgetStatus: () => api.budgets(state.month.year, state.month.month),
+    setBudget: (categoryId, body) => api.setBudget(categoryId, body),
     linkContribution: (transactionId, assetId) => mutate(() => api.linkContribution(transactionId, assetId)),
     itemById,
     createItem: (kind, body) => mutate(() => api.createItem(collectionOf(kind), body)),

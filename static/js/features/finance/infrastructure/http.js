@@ -87,5 +87,8 @@ export function createFinanceApi({ request }) {
     deleteRecurring: (id) => call('DELETE', `/recurring/${encodeURIComponent(id)}`),
     occurrence: (id, action, body) => call('POST', `/recurring/${encodeURIComponent(id)}/${action}`, body),
     makeRecurring: (transactionId, body) => call('POST', `/transactions/${encodeURIComponent(transactionId)}/make-recurring`, body),
+    // v2 stage 4: budgets.
+    budgets: (year, month) => call('GET', `/budgets${qs({ year, month })}`),
+    setBudget: (categoryId, body) => call('PUT', `/budgets/${encodeURIComponent(categoryId)}`, body),
   };
 }
