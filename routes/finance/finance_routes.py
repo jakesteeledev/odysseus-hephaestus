@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from core.database import SessionLocal, engine
 from src.auth_helpers import require_user
 from src.finance import csv_io, imports
+from src.finance import budgets as bud
 from src.finance import loans
 from src.finance import recurring as rec
 from src.finance import networth as nw
@@ -212,6 +213,11 @@ class OccurrenceAction(BaseModel):
     date: Optional[str] = None
     amount: Optional[str] = None
     transaction_id: Optional[str] = None
+
+
+class BudgetSet(BaseModel):
+    limit: Optional[str] = None  # empty/null removes the budget from `month`
+    month: Optional[str] = None  # YYYY-MM, default this month
 
 
 class MakeRecurring(BaseModel):
@@ -533,6 +539,21 @@ def setup_finance_routes() -> APIRouter:
         owner = _owner(request)
         with _session() as db:
             return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"))
+
+    # Budgets (v2 stage 4): specific paths before the generic routes below.
+
+    @router.get("/budgets")
+    def budgets(request: Request, year: Optional[int] = None, month: Optional[int] = None):
+        owner = _owner(request)
+        with _session() as db:
+            return bud.budget_status(db, owner, year=year, month=month)
+
+    @router.put("/budgets/{category_id}")
+    def set_budget(category_id: str, body: BudgetSet, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            row = bud.set_budget(db, owner, category_id, body.limit, month=body.month)
+            return {"category_id": row.category_id, "month": row.month.isoformat()[:7], "limit_pence": row.limit_pence}
 
     # Recurring items (v2 stage 3): specific paths before the generic routes below.
 

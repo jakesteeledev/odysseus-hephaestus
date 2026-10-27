@@ -26,7 +26,7 @@ from core.database import Base
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _create(bind, tables) -> None:
@@ -68,7 +68,13 @@ def _step_4(bind) -> None:
     _create(bind, V4_TABLES)
 
 
-STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4}
+def _step_5(bind) -> None:
+    from src.finance.models import V5_TABLES
+
+    _create(bind, V5_TABLES)
+
+
+STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4, 5: _step_5}
 
 
 def _current_version(bind) -> int:

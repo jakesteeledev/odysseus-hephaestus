@@ -320,6 +320,28 @@ class FinanceRecurringEvent(TimestampMixin, Base):
     )
 
 
+class FinanceBudget(TimestampMixin, Base):
+    """A monthly spending limit for a category, from `month` until changed.
+
+    The limit for a month is the latest row on or before that month, so past
+    months keep the limit they had. ``limit_pence`` NULL means no budget from
+    that month. No rollover: each month starts fresh.
+    """
+
+    __tablename__ = "finance_budgets"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    category_id = Column(String, ForeignKey("finance_categories.id", ondelete="CASCADE"), nullable=False)
+    month = Column(Date, nullable=False)  # first day of the month it starts
+    limit_pence = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("limit_pence IS NULL OR limit_pence >= 0", name="ck_finance_budget_limit"),
+        UniqueConstraint("owner", "category_id", "month", name="uq_finance_budget_month"),
+    )
+
+
 class FinanceMeta(Base):
     """Finance schema bookkeeping (key/value), e.g. schema_version."""
 
@@ -351,7 +373,8 @@ V4_TABLES = [
     FinanceRecurring.__table__,
     FinanceRecurringEvent.__table__,
 ]
-FINANCE_TABLES = V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + [FinanceMeta.__table__]
+V5_TABLES = [FinanceBudget.__table__]
+FINANCE_TABLES = V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + [FinanceMeta.__table__]
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()
 _ensure_lock = threading.Lock()

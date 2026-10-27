@@ -82,3 +82,21 @@ def test_make_recurring_and_suggestions(client):
 def test_recurring_routes_do_not_shadow_v1_routes(client):
     assert "accounts" in _ok(client.get("/api/finance/accounts"))
     assert "recurring" in _ok(client.get("/api/finance/recurring"))
+
+
+def test_budget_routes(client, monkeypatch):
+    from src.finance import budgets as bud
+
+    monkeypatch.setattr(bud, "_today_for_owner", lambda: date(2026, 10, 27))
+    acc = _ok(client.post("/api/finance/accounts", json={"name": "Current"}))
+    cats = {c["name"]: c["id"] for c in _ok(client.get("/api/finance/categories"))["categories"]}
+    _ok(client.put(f"/api/finance/budgets/{cats['Groceries']}", json={"limit": "300"}))
+    _ok(client.post("/api/finance/transactions", json={
+        "account_id": acc["id"], "date": "2026-10-03", "amount": "45", "direction": "out",
+        "category_id": cats["Groceries"]}))
+    status = _ok(client.get("/api/finance/budgets"))
+    assert status["month"] == "2026-10" and status["budgets"][0]["remaining_pence"] == 25500
+    assert _ok(client.get("/api/finance/budgets?year=2026&month=9"))["budgets"] == []
+    assert client.put(f"/api/finance/budgets/{cats['Salary']}", json={"limit": "5"}).status_code == 400
+    _ok(client.put(f"/api/finance/budgets/{cats['Groceries']}", json={"limit": None, "month": "2026-11"}))
+    assert _ok(client.get("/api/finance/budgets?year=2026&month=11"))["budgets"] == []
