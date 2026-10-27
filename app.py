@@ -900,6 +900,10 @@ logger.info("Webhook & API token routes initialized")
 from routes.note.note_routes import setup_note_routes
 app.include_router(setup_note_routes(task_scheduler, upload_handler=upload_handler))
 
+# HEPHAESTUS PATCH: personal finance tracker (routes/finance, src/finance).
+from routes.finance.finance_routes import setup_finance_routes
+app.include_router(setup_finance_routes())
+
 # Email
 from routes.email_routes import setup_email_routes
 email_router = setup_email_routes()

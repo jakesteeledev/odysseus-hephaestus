@@ -73,6 +73,25 @@ def _new_id() -> str:
     return uuid.uuid4().hex
 
 
+def resolve_owner(user) -> str:
+    """Storage owner for a request or chat user.
+
+    Named users own their own data. With no user (login turned off, or the
+    loopback single-user modes) data goes to Odysseus's reserved local owner,
+    so the UI and agent tools see the same data. Internal sentinel callers
+    are refused.
+    """
+    from src.owner_identity import (
+        DEFAULT_LOCAL_OWNER,
+        effective_storage_owner,
+        is_request_sentinel_owner,
+    )
+
+    if is_request_sentinel_owner(user):
+        raise FinanceError("finance is not available to internal callers")
+    return effective_storage_owner(user) or DEFAULT_LOCAL_OWNER
+
+
 def _require_owner(owner) -> str:
     owner = str(owner or "").strip()
     if not owner:
