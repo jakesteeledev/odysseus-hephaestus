@@ -77,6 +77,7 @@ def test_upgrade_preserves_v1_rows_and_makes_a_backup(v1_database, tmp_path):
     engine = _engine(v1_database)
     tables = set(inspect(engine).get_table_names())
     assert {"finance_assets", "finance_liabilities", "finance_valuations", "finance_contributions",
+            "finance_loan_schedules", "finance_repayments", "finance_recurring", "finance_recurring_events",
             "finance_meta"} <= tables
     with engine.connect() as conn:
         assert conn.execute(text("SELECT value FROM finance_meta WHERE key='schema_version'")).scalar() == str(

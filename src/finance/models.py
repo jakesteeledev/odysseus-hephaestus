@@ -15,6 +15,7 @@ import threading
 import weakref
 
 from sqlalchemy import (
+    UniqueConstraint,
     Boolean,
     CheckConstraint,
     Column,
@@ -268,6 +269,57 @@ class FinanceRepayment(TimestampMixin, Base):
     )
 
 
+FREQUENCIES = ("weekly", "four_weekly", "monthly", "quarterly", "yearly")
+
+
+class FinanceRecurring(TimestampMixin, Base):
+    """A regular payment or income: expected on schedule, confirmed by the user."""
+
+    __tablename__ = "finance_recurring"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    account_id = Column(String, ForeignKey("finance_accounts.id"), nullable=False)
+    amount_pence = Column(Integer, nullable=False)
+    direction = Column(String, nullable=False, default="out")
+    category_id = Column(String, ForeignKey("finance_categories.id"), nullable=True)
+    frequency = Column(String, nullable=False, default="monthly")
+    anchor_date = Column(Date, nullable=False)  # first due date; later ones follow the frequency
+    end_date = Column(Date, nullable=True)
+    match_text = Column(String, nullable=False, default="")  # words expected in the bank description
+    liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=True)  # loan payment
+    asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=True)  # regular contribution
+    archived = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint("amount_pence > 0", name="ck_finance_recurring_amount"),
+        CheckConstraint("direction IN ('in', 'out')", name="ck_finance_recurring_direction"),
+        CheckConstraint("frequency IN ('weekly', 'four_weekly', 'monthly', 'quarterly', 'yearly')",
+                        name="ck_finance_recurring_frequency"),
+    )
+
+
+class FinanceRecurringEvent(TimestampMixin, Base):
+    """The user's decision for one due date: confirmed (with a transaction) or skipped."""
+
+    __tablename__ = "finance_recurring_events"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    recurring_id = Column(String, ForeignKey("finance_recurring.id", ondelete="CASCADE"), nullable=False, index=True)
+    due_date = Column(Date, nullable=False)
+    status = Column(String, nullable=False)
+    # Deleting the transaction makes the occurrence expected again.
+    transaction_id = Column(String, ForeignKey("finance_transactions.id", ondelete="CASCADE"), nullable=True)
+    created_transaction = Column(Boolean, nullable=False, default=False)  # made by "confirm"
+
+    __table_args__ = (
+        CheckConstraint("status IN ('confirmed', 'skipped')", name="ck_finance_recurring_event_status"),
+        UniqueConstraint("recurring_id", "due_date", name="uq_finance_recurring_event_due"),
+    )
+
+
 class FinanceMeta(Base):
     """Finance schema bookkeeping (key/value), e.g. schema_version."""
 
@@ -295,7 +347,11 @@ V3_TABLES = [
     FinanceLoanSchedule.__table__,
     FinanceRepayment.__table__,
 ]
-FINANCE_TABLES = V1_TABLES + V2_TABLES + V3_TABLES + [FinanceMeta.__table__]
+V4_TABLES = [
+    FinanceRecurring.__table__,
+    FinanceRecurringEvent.__table__,
+]
+FINANCE_TABLES = V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + [FinanceMeta.__table__]
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()
 _ensure_lock = threading.Lock()

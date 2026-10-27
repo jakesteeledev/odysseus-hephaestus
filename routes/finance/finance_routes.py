@@ -19,6 +19,7 @@ from core.database import SessionLocal, engine
 from src.auth_helpers import require_user
 from src.finance import csv_io, imports
 from src.finance import loans
+from src.finance import recurring as rec
 from src.finance import networth as nw
 from src.finance import service as fin
 from src.finance.models import ACCOUNT_TYPES, CATEGORY_COLORS, ensure_tables
@@ -175,6 +176,47 @@ class PaymentLink(BaseModel):
 
 class RateSet(BaseModel):
     interest_rate: Optional[str] = None
+
+
+class RecurringCreate(BaseModel):
+    name: str
+    account_id: str
+    amount: str
+    direction: str = "out"
+    frequency: str = "monthly"
+    next_due: Optional[str] = None
+    end_date: Optional[str] = None
+    category_id: Optional[str] = None
+    match_text: str = ""
+    liability_id: Optional[str] = None
+    asset_id: Optional[str] = None
+
+
+class RecurringUpdate(BaseModel):
+    name: Optional[str] = None
+    account_id: Optional[str] = None
+    amount: Optional[str] = None
+    direction: Optional[str] = None
+    frequency: Optional[str] = None
+    next_due: Optional[str] = None
+    end_date: Optional[str] = None
+    category_id: Optional[str] = None
+    match_text: Optional[str] = None
+    liability_id: Optional[str] = None
+    asset_id: Optional[str] = None
+    archived: Optional[bool] = None
+
+
+class OccurrenceAction(BaseModel):
+    due_date: str
+    date: Optional[str] = None
+    amount: Optional[str] = None
+    transaction_id: Optional[str] = None
+
+
+class MakeRecurring(BaseModel):
+    frequency: str = "monthly"
+    name: Optional[str] = None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -491,6 +533,72 @@ def setup_finance_routes() -> APIRouter:
         owner = _owner(request)
         with _session() as db:
             return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"))
+
+    # Recurring items (v2 stage 3): specific paths before the generic routes below.
+
+    @router.get("/upcoming")
+    def upcoming(request: Request, days: int = 30):
+        owner = _owner(request)
+        with _session() as db:
+            return rec.upcoming(db, owner, days=days)
+
+    @router.get("/recurring")
+    def list_recurring(request: Request, include_archived: bool = False):
+        owner = _owner(request)
+        with _session() as db:
+            return {"recurring": rec.list_recurring(db, owner, include_archived=include_archived)}
+
+    @router.get("/recurring/suggestions")
+    def recurring_suggestions(request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return {"suggestions": rec.suggestions(db, owner)}
+
+    @router.post("/recurring")
+    def create_recurring(body: RecurringCreate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return rec.recurring_to_dict(rec.create_recurring(db, owner, **body.model_dump()))
+
+    @router.patch("/recurring/{recurring_id}")
+    def update_recurring(recurring_id: str, body: RecurringUpdate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return rec.recurring_to_dict(rec.update_recurring(db, owner, recurring_id, **_changes(body)))
+
+    @router.delete("/recurring/{recurring_id}")
+    def delete_recurring(recurring_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            rec.delete_recurring(db, owner, recurring_id)
+            return {"ok": True}
+
+    @router.post("/recurring/{recurring_id}/{action}")
+    def occurrence_action(recurring_id: str, action: str, body: OccurrenceAction, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            if action == "confirm":
+                event = rec.confirm(db, owner, recurring_id, body.due_date, on=body.date, amount=body.amount)
+            elif action == "match":
+                if not body.transaction_id:
+                    raise fin.FinanceError("choose the transaction to match")
+                event = rec.match(db, owner, recurring_id, body.due_date, body.transaction_id)
+            elif action == "skip":
+                event = rec.skip(db, owner, recurring_id, body.due_date)
+            elif action == "undo":
+                rec.undo(db, owner, recurring_id, body.due_date)
+                return {"ok": True}
+            else:
+                raise HTTPException(404, "unknown action")
+            return {"ok": True, "status": event.status, "transaction_id": event.transaction_id}
+
+    @router.post("/transactions/{transaction_id}/make-recurring")
+    def make_recurring(transaction_id: str, body: MakeRecurring, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            item = rec.make_recurring_from_transaction(db, owner, transaction_id, frequency=body.frequency,
+                                                       name=body.name)
+            return rec.recurring_to_dict(item)
 
     # Loans (v2 stage 2): specific paths before the generic routes below.
 
