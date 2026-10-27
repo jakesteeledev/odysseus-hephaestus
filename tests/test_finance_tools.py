@@ -414,3 +414,71 @@ def test_add_transaction_towards_unknown_or_income_saves_nothing(car_loan, db_fa
     db = db_factory()
     assert not fin.list_transactions(db, OWNER, fin.TransactionFilter(start=TODAY))
     db.close()
+
+
+# ── v2 stage 3: recurring items in tools ───────────────────────────────
+
+
+@pytest.fixture
+def bills(seeded, db_factory, monkeypatch):
+    from src.finance import recurring as rec
+
+    monkeypatch.setattr(rec, "_today_for_owner", lambda: TODAY)
+    monkeypatch.setattr(fin, "_today_for_owner", lambda: TODAY)
+    db = db_factory()
+    netflix = rec.create_recurring(db, OWNER, name="Netflix", account_id=seeded["current"], amount="10.99",
+                                   next_due="2026-10-29")
+    rec.create_recurring(db, OWNER, name="Rent", account_id=seeded["current"], amount="900", next_due="2026-11-01")
+    rec.create_recurring(db, OWNER, name="Council tax", account_id=seeded["current"], amount="150",
+                         next_due="2026-10-20")
+    ids = {"netflix": netflix.id}
+    db.commit()
+    db.close()
+    return ids
+
+
+def test_upcoming_view(bills):
+    week = run(tools.do_query_finances, {"view": "upcoming", "days": 7})
+    text = week["response"]
+    assert "- 2026-10-20 Council tax -£150.00 [Monzo Current, monthly] OVERDUE" in text
+    assert "- 2026-10-29 Netflix -£10.99" in text and "- 2026-11-01 Rent -£900.00" in text
+    assert "Total going out: £1,060.99" in text
+    # Month-end projection only counts items due by 31 October.
+    assert "Monzo Current: £2,913.81 (now £3,074.80)" in text
+    assert run(tools.do_query_finances, {"view": "bills"})["data"]["view"] == "upcoming"
+
+
+def test_manage_recurring_add_list_skip(bills):
+    added = run(tools.do_manage_recurring, {"action": "add", "name": "Gym", "amount": "35", "account": "monzo",
+                                            "frequency": "monthly", "next_due": "2026-11-05", "category": "health"})
+    assert added["exit_code"] == 0 and "Gym: -£35.00 monthly from Monzo Current, next due 2026-11-05" in added["response"]
+    listed = run(tools.do_manage_recurring, {"action": "list"})
+    assert "- Gym: -£35.00 monthly" in listed["response"]
+    skipped = run(tools.do_manage_recurring, {"action": "skip", "name": "council"})
+    assert skipped["exit_code"] == 0 and "Skipped Council tax due 2026-10-20" in skipped["response"]
+
+
+def test_manage_recurring_confirm_creates_or_matches(bills, db_factory):
+    created = run(tools.do_manage_recurring, {"action": "confirm", "name": "council tax"})
+    assert created["exit_code"] == 0 and "recorded £150.00 on Monzo Current" in created["response"]
+    from src.finance.models import FinanceAccount
+
+    db = db_factory()
+    current = db.query(FinanceAccount).filter_by(name="Monzo Current").one()
+    fin.create_transaction(db, OWNER, account_id=current.id, date="2026-10-29", amount="10.99",
+                           direction="out", description="NETFLIX.COM")
+    db.commit()
+    db.close()
+    matched = run(tools.do_manage_recurring, {"action": "confirm", "name": "netflix"})
+    assert matched["exit_code"] == 0 and "by matching the transaction already recorded on 2026-10-29" in matched["response"]
+    assert "No new transaction was added" in matched["response"]
+
+
+def test_manage_recurring_asks_when_unclear(bills):
+    missing = run(tools.do_manage_recurring, {"action": "confirm", "name": "spotify"})
+    assert missing["exit_code"] == 1 and "doesn't match any recurring item" in missing["error"]
+    noname = run(tools.do_manage_recurring, {"action": "skip"})
+    assert noname["exit_code"] == 1 and "Which recurring item?" in noname["error"]
+    incomplete = run(tools.do_manage_recurring, {"action": "add", "name": "Gym"})
+    assert incomplete["exit_code"] == 1 and "needs a name and an amount" in incomplete["error"]
+    assert run(tools.do_manage_recurring, {"action": "explode"})["exit_code"] == 1

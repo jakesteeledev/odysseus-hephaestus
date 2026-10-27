@@ -831,6 +831,7 @@ _QWEN38_TOOL_ROUTER_PROMPT = (
     "query_finances: net worth, balances, spending/income totals, recent transactions; "
     "add_transaction/add_transfer: record money in/out or a transfer between the user's accounts. "
     "update_valuation: set a new value or balance owed for a named asset or liability. "
+    "manage_recurring: list/add/confirm/skip regular bills, subscriptions and income. "
     "manage_settings: app settings. manage_endpoints: configured API endpoints; list_models: available models. "
     "manage_mcp: MCP servers. manage_skills: skills. manage_webhooks: webhooks. manage_bg_jobs: running/background jobs. "
     "search_chats: past chats. web_search: public web lookup, URLs, links; web_fetch: fetch a concrete URL/domain. "

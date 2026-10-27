@@ -1965,6 +1965,7 @@ async def _execute_tool_block_impl(
         do_manage_skills, do_api_call, do_manage_notes,
         do_manage_calendar,
         do_query_finances, do_add_transaction, do_add_transfer, do_update_valuation,  # HEPHAESTUS PATCH
+        do_manage_recurring,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
@@ -2323,6 +2324,9 @@ async def _execute_tool_block_impl(
     elif tool == "update_valuation":
         desc = "update_valuation"
         result = await dispatched(do_update_valuation(content, owner=owner))
+    elif tool == "manage_recurring":
+        desc = "manage_recurring"
+        result = await dispatched(do_manage_recurring(content, owner=owner))
     elif tool == "download_model":
         desc = "download_model"
         result = await dispatched(do_download_model(content, owner=owner))

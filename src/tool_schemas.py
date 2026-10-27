@@ -1583,15 +1583,16 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "view": {"type": "string", "enum": ["overview", "net_worth", "balances", "assets", "liabilities", "summary", "transactions"],
-                             "description": "overview (default) = net worth breakdown and this month's totals; net_worth = assets minus liabilities by type; balances = per account; assets = property/investments/pensions/vehicles with values; liabilities = mortgage/loans/student loan/BNPL with balances owed; summary = money in/out/net and spending by category for a period; transactions = recent entries."},
+                    "view": {"type": "string", "enum": ["overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "summary", "transactions"],
+                             "description": "overview (default) = net worth breakdown and this month's totals; net_worth = assets minus liabilities by type; balances = per account; assets = property/investments/pensions/vehicles with values; liabilities = mortgage/loans/student loan/BNPL with balances owed; upcoming = bills and income due soon with projected month-end balances; summary = money in/out/net and spending by category for a period; transactions = recent entries."},
                     "start": {"type": "string", "description": "Period start, YYYY-MM-DD (summary/transactions). Default: first day of this month."},
                     "end": {"type": "string", "description": "Period end, YYYY-MM-DD, inclusive. Default: last day of this month."},
                     "account": {"type": "string", "description": "Optional account name, e.g. 'savings' (partial names are fine)."},
                     "category": {"type": "string", "description": "Optional category name for transactions, e.g. 'groceries'."},
                     "search": {"type": "string", "description": "Optional text to find in transaction descriptions."},
                     "name": {"type": "string", "description": "Optional asset or liability name to focus on (assets/liabilities views), e.g. 'car' or 'mortgage'."},
-                    "limit": {"type": "integer", "description": "How many transactions to return (default 10, max 50)."}
+                    "limit": {"type": "integer", "description": "How many transactions to return (default 10, max 50)."},
+                    "days": {"type": "integer", "description": "For upcoming: how many days ahead (default 30; 7 for 'this week')."}
                 },
                 "required": []
             }
@@ -1650,6 +1651,28 @@ FUNCTION_TOOL_SCHEMAS = [
                     "note": {"type": "string", "description": "Optional note, e.g. 'from statement'."}
                 },
                 "required": ["name", "value"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_recurring",
+            "description": "The user's regular bills, subscriptions and income. list them; add one; confirm one as paid (if a matching transaction is already recorded it is matched, otherwise one is recorded); or skip one. Ask the user if a name is ambiguous.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "add", "confirm", "skip"], "description": "What to do (default list)."},
+                    "name": {"type": "string", "description": "Item name, e.g. 'Netflix' or 'rent' (partial names are fine)."},
+                    "amount": {"type": "string", "description": "add: amount in pounds. confirm: only if it differed from usual."},
+                    "account": {"type": "string", "description": "add: account it comes from or goes into."},
+                    "direction": {"type": "string", "enum": ["out", "in"], "description": "add: out = payment (default), in = income."},
+                    "frequency": {"type": "string", "enum": ["weekly", "four_weekly", "monthly", "quarterly", "yearly"], "description": "add: how often (default monthly)."},
+                    "next_due": {"type": "string", "description": "add: next due date, YYYY-MM-DD (default today)."},
+                    "category": {"type": "string", "description": "add: optional category name."},
+                    "due_date": {"type": "string", "description": "confirm/skip: which due date, YYYY-MM-DD (default the oldest one waiting)."}
+                },
+                "required": []
             }
         }
     },

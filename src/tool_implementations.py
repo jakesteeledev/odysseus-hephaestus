@@ -62,7 +62,7 @@ from src.tools.search import do_search_chats  # noqa: F401
 from src.tools.notes import do_manage_notes  # noqa: F401
 # HEPHAESTUS PATCH: finance tracker tools (src/tools/finance.py).
 from src.tools.finance import (  # noqa: F401
-    do_query_finances, do_add_transaction, do_add_transfer, do_update_valuation,
+    do_query_finances, do_add_transaction, do_add_transfer, do_update_valuation, do_manage_recurring,
 )
 # Calendar domain extracted to src/tools/calendar.py (slice 1, #4082/#4071).
 from src.tools.calendar import do_manage_calendar  # noqa: F401

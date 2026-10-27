@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import re
 
-FINANCE_TOOLS = frozenset({"query_finances", "add_transaction", "add_transfer", "update_valuation"})
+FINANCE_TOOLS = frozenset({"query_finances", "add_transaction", "add_transfer", "update_valuation",
+                           "manage_recurring"})
 
 _MONEY_AMOUNT = r"(?:£\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s*(?:pounds?|quid|gbp)\b)"
 
@@ -32,6 +33,9 @@ FINANCE_FAMILY_PATTERN = (
     r"student\s+loans?|klarna|clearpay|bnpl|crypto)\b"
     r"|\bmy\s+(?:property|house|home|flat|car|shares|isa|sipp)\b|\b(?:house|property|car|home)\s+value\b"
     r"|\bshares\s+in\b|\bworth\s+(?:now|£|\d)|\bwhat\b.{0,30}\bworth\b"
+    # v2 stage 3: recurring items.
+    r"|\b(?:recurring|direct\s+debits?|standing\s+orders?|subscriptions|bills)\b"
+    r"|\b(?:upcoming|regular)\s+(?:payments?|income)\b|\bcoming\s+out\s+of\s+my\b"
 )
 FINANCE_FAMILY_RE = re.compile(FINANCE_FAMILY_PATTERN, re.I)
 
@@ -53,6 +57,17 @@ FINANCE_INTENT_PATTERNS = tuple(
         ("update value request",
          rf"\b(?:update|set|change)\b.{{0,50}}\b(?:to|at)\s+{_MONEY_AMOUNT}"),
         ("new value statement", rf"\bmy\b.{{0,40}}\b(?:is|are)\s+(?:now\s+)?(?:worth|at)\s+(?:about\s+)?{_MONEY_AMOUNT}"),
+        ("bills due question",
+         r"\b(?:bills?|payments?|direct\s+debits?|standing\s+orders?|subscriptions?|rent|salary|pay\s*day)\b"
+         r".{0,40}\b(?:due|coming\s+(?:up|out)|upcoming|go(?:ing)?\s+out)\b"),
+        ("upcoming payments question", r"\b(?:upcoming|regular|recurring)\s+(?:bills?|payments?|income|items?)\b"),
+        ("coming out question", r"\bwhat(?:'s|\s+is)\s+(?:coming|going)\s+out\b"),
+        ("list recurring request",
+         r"\b(?:my|list|show|what|which)\b.{0,20}\b(?:subscriptions|direct\s+debits|standing\s+orders|"
+         r"recurring\s+(?:items|payments|bills))\b"),
+        ("skip or confirm occurrence", r"\b(?:skip|confirm)\b.{0,40}\b(?:this|next|last)\s+(?:month|week)(?:'s)?\b"),
+        ("add recurring request",
+         r"\b(?:add|set\s+up|create)\b.{0,30}\b(?:recurring|monthly|weekly|yearly|regular)\s+(?:payment|bill|subscription|income|direct\s+debit)\b"),
         ("how much spent/earned question",
          r"\bhow\s+much\b.{0,40}\b(?:did|have|do|am|was)\s+i\b.{0,30}"
          r"\b(?:spen[dt]|earn(?:ed)?|save[d]?|owe|have|got|left|paid|make|made)\b"),
@@ -72,6 +87,9 @@ FINANCE_KEYWORDS = (
     # v2
     "assets", "liabilities", "worth", "equity", "mortgage", "loan", "debt", "owe", "pension", "isa",
     "investments", "shares", "crypto", "house value", "car value", "student loan", "klarna",
+    # v2 stage 3
+    "recurring", "subscriptions", "direct debit", "direct debits", "standing order", "bills", "bills due",
+    "upcoming payments",
 )
 
 

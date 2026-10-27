@@ -24,7 +24,7 @@ from src.tools._common import _parse_tool_args
 
 logger = logging.getLogger(__name__)
 
-QUERY_VIEWS = ("overview", "net_worth", "balances", "assets", "liabilities", "summary", "transactions")
+QUERY_VIEWS = ("overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "summary", "transactions")
 _DEFAULT_TX_LIMIT = 10
 _MAX_TX_LIMIT = 50
 
@@ -175,7 +175,8 @@ async def do_query_finances(content, owner: Optional[str] = None) -> Dict:
             "recent": "transactions", "list": "transactions", "transaction": "transactions",
             "asset": "assets", "investments": "assets", "pensions": "assets", "property": "assets",
             "liability": "liabilities", "debts": "liabilities", "debt": "liabilities", "loans": "liabilities",
-            "owe": "liabilities", "mortgage": "liabilities"}.get(view, view)
+            "owe": "liabilities", "mortgage": "liabilities", "bills": "upcoming", "recurring": "upcoming",
+            "due": "upcoming", "subscriptions": "upcoming", "scheduled": "upcoming"}.get(view, view)
     if view not in QUERY_VIEWS:
         return _err(f"view must be one of: {', '.join(QUERY_VIEWS)}")
     try:
@@ -274,6 +275,35 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
         lines.append(f"Total across active accounts: {format_pence(overview['total_pence'])}")
         lines.append("Balances:")
         lines += _balances_text(accounts)
+
+    if view == "upcoming":
+        from src.finance import recurring as rec
+
+        try:
+            days = int(_first(args, "days", default=30))
+        except (TypeError, ValueError):
+            days = 30
+        up = rec.upcoming(db, owner, days=max(1, min(days, 366)))
+        data["upcoming"] = up
+        names = {a["id"]: a["name"] for a in fin.list_accounts(db, owner, include_archived=True)}
+        rows = [r for r in up["items"] if r["status"] in ("overdue", "expected")]
+        if not rows:
+            lines.append(f"Nothing expected between {up['today']} and {up['until']}.")
+        else:
+            lines.append(f"Expected recurring items up to {up['until']} (not yet confirmed):")
+            for r in rows:
+                sign = "+" if r["direction"] == "in" else "-"
+                extra = " OVERDUE" if r["status"] == "overdue" else ""
+                if r["matches"]:
+                    extra += " (a matching transaction is already recorded; confirm to match it)"
+                lines.append(f"- {r['due_date']} {r['name']} {sign}{format_pence(r['amount_pence'])} "
+                             f"[{names.get(r['account_id'], '?')}, {r['frequency_label'].lower()}]{extra}")
+            total_out = sum(r["amount_pence"] for r in rows if r["direction"] == "out")
+            lines.append(f"Total going out: {format_pence(total_out)}")
+        if up["projected_balances"]:
+            lines.append(f"Projected balances at {up['month_end']} (after expected items this month):")
+            lines += [f"- {p['name']}: {format_pence(p['projected_pence'])} (now {format_pence(p['balance_pence'])})"
+                      for p in up["projected_balances"]]
 
     if view in ("assets", "liabilities"):
         kind = "asset" if view == "assets" else "liability"
@@ -557,3 +587,130 @@ async def do_update_valuation(content, owner: Optional[str] = None) -> Dict:
         text += f" (was {format_pence(before[0])} on {before[1]})"
     text += f". Net worth is now {format_pence(worth)}."
     return {"response": text, "data": saved, "exit_code": 0}
+
+
+# ── manage_recurring ────────────────────────────────────────────────────
+
+
+def _recurring_line(r: dict, accounts: dict) -> str:
+    sign = "+" if r["direction"] == "in" else "-"
+    return (f"- {r['name']}: {sign}{format_pence(r['amount_pence'])} {r['frequency_label'].lower()} from "
+            f"{accounts.get(r['account_id'], '?')}, next due {r.get('next_due') or 'none'}")
+
+
+async def do_manage_recurring(content, owner: Optional[str] = None) -> Dict:
+    """List, add, confirm or skip recurring payments and income."""
+    from src.finance import recurring as rec
+    from src.finance.models import FinanceRecurring
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return _err("Invalid JSON arguments")
+    action = str(_first(args, "action", default="list")).strip().lower()
+    action = {"create": "add", "new": "add", "paid": "confirm", "done": "confirm", "record": "confirm",
+              "show": "list", "view": "list"}.get(action, action)
+    if action not in ("list", "add", "confirm", "skip"):
+        return _err("action must be list, add, confirm or skip")
+    try:
+        owner = fin.resolve_owner(owner)
+        with _session() as db:
+            accounts = {a["id"]: a["name"] for a in fin.list_accounts(db, owner, include_archived=True)}
+            if action == "list":
+                items = rec.list_recurring(db, owner)
+                if not items:
+                    return {"response": "No recurring items yet.", "data": {"recurring": []}, "exit_code": 0}
+                return {"response": "Recurring items:\n" + "\n".join(_recurring_line(r, accounts) for r in items),
+                        "data": {"recurring": items}, "exit_code": 0}
+
+            if action == "add":
+                name = _first(args, "name")
+                amount = _first(args, "amount")
+                if name is None or amount is None:
+                    return _err("Nothing saved. A recurring item needs a name and an amount. Ask the user.")
+                if _first(args, "account") is None:
+                    active = fin.list_accounts(db, owner)
+                    if len(active) != 1:
+                        return _err("Nothing saved. Which account does it come from or go into? Existing: "
+                                    f"{', '.join(a['name'] for a in active) or 'none yet'}. Ask the user.")
+                    account = active[0]
+                else:
+                    account, error = _resolve(db, owner, "account", args["account"])
+                    if error:
+                        return error
+                category_id = None
+                if _first(args, "category") is not None:
+                    category, error = _resolve(db, owner, "category", args["category"])
+                    if error:
+                        return error
+                    category_id = category["id"]
+                liability_id = None
+                if _first(args, "towards") is not None:
+                    from src.finance import networth as nw
+
+                    match = match_name(args["towards"], nw.list_items(db, owner, "liability"))
+                    if not match.ok:
+                        return _err(f"Nothing saved. '{args['towards']}' doesn't match one debt "
+                                    f"({', '.join(match.options[:15]) or 'none yet'}). Ask the user.")
+                    liability_id = match.item["id"]
+                item = rec.create_recurring(
+                    db, owner, name=name, account_id=account["id"], amount=_amount_text(amount),
+                    direction=_direction(args), frequency=_first(args, "frequency", default="monthly"),
+                    next_due=_parse_day(_first(args, "next_due", "date"), field="next due date"),
+                    end_date=_first(args, "end_date"), category_id=category_id, liability_id=liability_id)
+                saved = rec.recurring_to_dict(item)
+                db.commit()
+                return {"response": f"Recurring item added: {_recurring_line({**saved, 'next_due': saved['anchor_date']}, accounts)[2:]}. "
+                                    "It will show as expected on each due date; nothing is recorded until confirmed.",
+                        "data": saved, "exit_code": 0}
+
+            # confirm / skip: find the item and its occurrence.
+            items = [rec.recurring_to_dict(i) for i in db.query(FinanceRecurring).filter(
+                FinanceRecurring.owner == owner, FinanceRecurring.archived.is_(False))]
+            name = _first(args, "name")
+            if name is None:
+                return _err(f"Nothing saved. Which recurring item? Existing: "
+                            f"{', '.join(i['name'] for i in items) or 'none yet'}. Ask the user.")
+            match = match_name(name, items)
+            if not match.ok:
+                word = "matches more than one" if match.status == "ambiguous" else "doesn't match any"
+                return _err(f"Nothing saved. '{name}' {word} recurring item: "
+                            f"{', '.join(match.options[:15]) or 'none yet'}. Ask the user which one.")
+            item = rec.get_recurring(db, owner, match.item["id"])
+            today = _today()
+            pending = [o for o in rec.occurrences(db, owner, today - timedelta(days=rec.LOOKBACK_DAYS),
+                                                  today + timedelta(days=31), today=today, items=[item])
+                       if o.status in ("expected", "overdue")]
+            if _first(args, "due_date") is not None:
+                due = _parse_day(args["due_date"], field="due date")
+            elif pending:
+                due = pending[0].due  # the oldest one still waiting
+            else:
+                return _err(f"Nothing saved. {item.name} has nothing due to {action}.")
+            if action == "skip":
+                rec.skip(db, owner, item.id, due)
+                db.commit()
+                return {"response": f"Skipped {item.name} due {due.isoformat()}.", "data": {"due_date": due.isoformat()},
+                        "exit_code": 0}
+            candidates = rec.match_candidates(db, owner, item, due)
+            if candidates and _first(args, "amount") is None:
+                tx = candidates[0]
+                rec.match(db, owner, item.id, due, tx["id"])
+                db.commit()
+                return {"response": f"Confirmed {item.name} due {due.isoformat()} by matching the transaction "
+                                    f"already recorded on {tx['date']} ({format_pence(tx['amount_pence'])}, "
+                                    f"\"{tx['description']}\"). No new transaction was added.",
+                        "data": {"due_date": due.isoformat(), "transaction_id": tx["id"]}, "exit_code": 0}
+            amount = _first(args, "amount")
+            event = rec.confirm(db, owner, item.id, due, on=_first(args, "date"),
+                                amount=_amount_text(amount) if amount is not None else None)
+            tx_amount = fin._get_transaction(db, owner, event.transaction_id).amount_pence
+            db.commit()
+            return {"response": f"Confirmed {item.name} due {due.isoformat()}: recorded "
+                                f"{format_pence(tx_amount)} on {accounts.get(item.account_id, '?')}.",
+                    "data": {"due_date": due.isoformat(), "transaction_id": event.transaction_id}, "exit_code": 0}
+    except fin.FinanceError as exc:
+        return _err(f"Nothing saved. {exc}")
+    except Exception as exc:  # pragma: no cover - unexpected storage failure
+        logger.exception("manage_recurring failed")
+        return _err(f"Nothing saved: {exc}")

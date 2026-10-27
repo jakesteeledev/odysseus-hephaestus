@@ -408,6 +408,8 @@ _TOOL_NAME_MAP = {
     "add_transaction": "add_transaction",
     "add_transfer": "add_transfer",
     "update_valuation": "update_valuation",
+    "manage_recurring": "manage_recurring",
+    "recurring": "manage_recurring",
     "manage_bg_jobs": "manage_bg_jobs",
     "bg_jobs": "manage_bg_jobs",
     "background_jobs": "manage_bg_jobs",

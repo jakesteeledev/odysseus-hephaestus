@@ -78,6 +78,7 @@ _COMMON_TOOL_NAMES = {
     "add_transaction",
     "add_transfer",
     "update_valuation",
+    "manage_recurring",
     "api_call",
     "app_api",
     "archive_email",
