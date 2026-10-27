@@ -110,12 +110,14 @@ def latest_valuation(db: Session, owner: str, kind: str, item_id: str,
 
 def liability_balance(db: Session, owner: str, liability: FinanceLiability,
                       as_of: Optional[date] = None) -> tuple[int, Optional[date]]:
-    """Balance owed and the date it comes from.
+    """Balance owed and the date of the last event it reflects.
 
-    Stage 1: the latest balance snapshot. Loan schedules (stage 2) extend this.
+    Worked out by ``src.finance.loans``: schedule start, balance snapshots
+    (which override from their date) and payments with interest.
     """
-    snap = latest_valuation(db, owner, "liability", liability.id, as_of)
-    return (snap.value_pence, snap.date) if snap else (0, None)
+    from src.finance.loans import balance
+
+    return balance(db, owner, liability, as_of)
 
 
 def contributions_total(db: Session, owner: str, asset_id: str, as_of: Optional[date] = None) -> int:
@@ -193,6 +195,10 @@ def delete_item(db: Session, owner, kind: str, item_id) -> None:
     has_history = db.query(FinanceValuation.id).filter(
         FinanceValuation.owner == owner, FinanceValuation.item_kind == kind,
         FinanceValuation.item_id == item.id).first() is not None
+    if kind == "liability":
+        from src.finance.loans import has_loan_history
+
+        has_history = has_history or has_loan_history(db, owner, item.id)
     if kind == "asset":
         has_history = has_history or db.query(FinanceContribution.id).filter(
             FinanceContribution.owner == owner, FinanceContribution.asset_id == item.id).first() is not None
@@ -399,8 +405,12 @@ def _item_dict(db: Session, owner: str, kind: str, item, as_of: Optional[date]) 
             data.update(mortgages=mortgages, equity_pence=data["value_pence"] - owed)
     else:
         balance, when = liability_balance(db, owner, item, as_of)
+        from src.finance.loans import get_schedule
+
         data.update(lender=item.lender or "", value_pence=balance,
-                    value_date=when.isoformat() if when else None, linked_asset_id=item.linked_asset_id)
+                    value_date=when.isoformat() if when else None, linked_asset_id=item.linked_asset_id,
+                    has_schedule=get_schedule(db, owner, item.id) is not None,
+                    interest_rate_percent=(item.interest_bp / 100) if item.interest_bp is not None else None)
     return data
 
 

@@ -26,7 +26,7 @@ from core.database import Base
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _create(bind, tables) -> None:
@@ -45,7 +45,24 @@ def _step_2(bind) -> None:
     _create(bind, V2_TABLES)
 
 
-STEPS = {1: _step_1, 2: _step_2}
+def _add_column(bind, table: str, column: str, ddl: str) -> None:
+    """ALTER TABLE ADD COLUMN, only if the column is missing (idempotent)."""
+    with bind.begin() as conn:
+        existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+        if existing and column not in existing:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+
+
+def _step_3(bind) -> None:
+    from src.finance.models import V3_TABLES
+
+    _create(bind, V3_TABLES)
+    # Nullable additions only: existing rows keep their values.
+    _add_column(bind, "finance_rules", "liability_id", "VARCHAR REFERENCES finance_liabilities(id)")
+    _add_column(bind, "finance_liabilities", "interest_bp", "INTEGER")
+
+
+STEPS = {1: _step_1, 2: _step_2, 3: _step_3}
 
 
 def _current_version(bind) -> int:

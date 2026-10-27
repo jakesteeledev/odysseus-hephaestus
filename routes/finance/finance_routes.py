@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from core.database import SessionLocal, engine
 from src.auth_helpers import require_user
 from src.finance import csv_io, imports
+from src.finance import loans
 from src.finance import networth as nw
 from src.finance import service as fin
 from src.finance.models import ACCOUNT_TYPES, CATEGORY_COLORS, ensure_tables
@@ -93,16 +94,19 @@ class ImportRequest(BaseModel):
     mapping_name: str = ""
     category_overrides: Dict[str, str] = {}
     exclude_rows: List[int] = []
+    liability_overrides: Dict[str, str] = {}
 
 
 class RuleCreate(BaseModel):
     pattern: str
     category_id: str
+    liability_id: Optional[str] = None
 
 
 class RuleUpdate(BaseModel):
     pattern: Optional[str] = None
     category_id: Optional[str] = None
+    liability_id: Optional[str] = None
 
 
 class MappingSave(BaseModel):
@@ -147,6 +151,30 @@ class ContributionCreate(BaseModel):
 
 class ContributionLink(BaseModel):
     asset_id: Optional[str] = None
+
+
+class ScheduleSet(BaseModel):
+    start_date: str
+    start_balance: str
+    apr: str = "0"
+    term_months: Optional[int] = None
+    monthly_payment: Optional[str] = None
+    payment_day: Optional[int] = None
+    balloon: str = "0"
+
+
+class RepaymentCreate(BaseModel):
+    amount: str
+    date: Optional[str] = None
+    note: str = ""
+
+
+class PaymentLink(BaseModel):
+    liability_id: Optional[str] = None
+
+
+class RateSet(BaseModel):
+    interest_rate: Optional[str] = None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -390,6 +418,7 @@ def setup_finance_routes() -> APIRouter:
                 db, owner, data=body.csv_text, mapping=body.mapping, account_id=body.account_id,
                 filename=body.filename, mapping_name=body.mapping_name,
                 category_overrides=body.category_overrides, exclude_rows=body.exclude_rows,
+                liability_overrides=body.liability_overrides,
             )
 
     @router.get("/imports")
@@ -417,7 +446,8 @@ def setup_finance_routes() -> APIRouter:
         owner = _owner(request)
         with _session() as db:
             return imports.rule_to_dict(imports.create_rule(db, owner, pattern=body.pattern,
-                                                            category_id=body.category_id))
+                                                            category_id=body.category_id,
+                                                            liability_id=body.liability_id))
 
     @router.patch("/rules/{rule_id}")
     def update_rule(rule_id: str, body: RuleUpdate, request: Request):
@@ -461,6 +491,55 @@ def setup_finance_routes() -> APIRouter:
         owner = _owner(request)
         with _session() as db:
             return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"))
+
+    # Loans (v2 stage 2): specific paths before the generic routes below.
+
+    @router.get("/liabilities/{liability_id}/loan")
+    def loan_details(liability_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return loans.loan_details(db, owner, liability_id)
+
+    @router.put("/liabilities/{liability_id}/schedule")
+    def set_schedule(liability_id: str, body: ScheduleSet, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return loans.schedule_to_dict(loans.set_schedule(db, owner, liability_id, **body.model_dump()))
+
+    @router.delete("/liabilities/{liability_id}/schedule")
+    def delete_schedule(liability_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            loans.delete_schedule(db, owner, liability_id)
+            return {"ok": True}
+
+    @router.put("/liabilities/{liability_id}/interest-rate")
+    def set_rate(liability_id: str, body: RateSet, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            item = loans.set_interest_rate(db, owner, liability_id, body.interest_rate)
+            return {"interest_rate_percent": item.interest_bp / 100 if item.interest_bp is not None else None}
+
+    @router.post("/liabilities/{liability_id}/repayments")
+    def add_repayment(liability_id: str, body: RepaymentCreate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return loans.repayment_to_dict(loans.add_repayment(db, owner, liability_id, amount=body.amount,
+                                                               on=body.date, note=body.note))
+
+    @router.delete("/repayments/{repayment_id}")
+    def delete_repayment(repayment_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            loans.delete_repayment(db, owner, repayment_id)
+            return {"ok": True}
+
+    @router.put("/transactions/{transaction_id}/payment")
+    def link_payment(transaction_id: str, body: PaymentLink, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            row = loans.link_transaction_payment(db, owner, transaction_id, body.liability_id)
+            return {"payment": loans.repayment_to_dict(row) if row else None}
 
     # Specific paths before the generic /{collection}/{item_id} routes below.
     @router.delete("/valuations/{valuation_id}")

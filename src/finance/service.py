@@ -572,9 +572,11 @@ def update_transaction(db: Session, owner, transaction_id, **changes) -> Finance
     if changes.get("notes") is not None:
         tx.notes = _clean_text(changes["notes"], field="notes", max_len=MAX_NOTES_LEN)
     db.flush()
+    from src.finance.loans import sync_transaction_payment
     from src.finance.networth import sync_transaction_contribution
 
     sync_transaction_contribution(db, owner, tx)
+    sync_transaction_payment(db, owner, tx)
     return tx
 
 
@@ -681,9 +683,12 @@ def list_transactions(db: Session, owner, flt: Optional[TransactionFilter] = Non
             FinanceTransaction.owner == owner, FinanceTransaction.transfer_id.in_(transfer_ids)
         ):
             other_side[(side.transfer_id, side.direction)] = side.account_id
+    from src.finance.loans import payment_links
     from src.finance.networth import contribution_links
 
-    links = contribution_links(db, owner, [t.id for t in rows if t.direction == "out"])
+    out_ids = [t.id for t in rows if t.direction == "out"]
+    links = contribution_links(db, owner, out_ids)
+    payments = payment_links(db, owner, out_ids)
     result = []
     for tx in rows:
         counterpart = None
@@ -691,6 +696,7 @@ def list_transactions(db: Session, owner, flt: Optional[TransactionFilter] = Non
             counterpart = other_side.get((tx.transfer_id, "in" if tx.direction == "out" else "out"))
         row = transaction_to_dict(tx, transfer_account_id=counterpart)
         row["contribution_asset_id"] = links.get(tx.id)
+        row["payment_liability_id"] = payments.get(tx.id)
         result.append(row)
     return result
 

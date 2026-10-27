@@ -119,6 +119,8 @@ class FinanceRule(TimestampMixin, Base):
     owner = Column(String, nullable=False, index=True)
     pattern = Column(String, nullable=False)
     category_id = Column(String, ForeignKey("finance_categories.id"), nullable=False)
+    # v2 (schema step 3): matching payments also count towards this liability.
+    liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=True)
 
 
 class FinanceBankMapping(TimestampMixin, Base):
@@ -174,6 +176,9 @@ class FinanceLiability(TimestampMixin, Base):
     archived = Column(Boolean, nullable=False, default=False)
     # A mortgage secured on a property asset, for equity.
     linked_asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=True)
+    # Interest rate in basis points (450 = 4.5%) for liabilities without a
+    # schedule, e.g. student loans (schema step 3).
+    interest_bp = Column(Integer, nullable=True)
 
     __table_args__ = (
         CheckConstraint("liability_type IN ('mortgage', 'loan', 'student_loan', 'bnpl', 'other')",
@@ -221,6 +226,48 @@ class FinanceContribution(TimestampMixin, Base):
     )
 
 
+class FinanceLoanSchedule(TimestampMixin, Base):
+    """Repayment terms for a mortgage, loan, car finance or BNPL (not student loans)."""
+
+    __tablename__ = "finance_loan_schedules"
+
+    liability_id = Column(String, ForeignKey("finance_liabilities.id", ondelete="CASCADE"), primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    start_date = Column(Date, nullable=False)
+    start_balance_pence = Column(Integer, nullable=False)
+    apr_bp = Column(Integer, nullable=False, default=0)  # 4.5% APR = 450
+    term_months = Column(Integer, nullable=True)
+    monthly_payment_pence = Column(Integer, nullable=True)  # fixed payment, if known
+    payment_day = Column(Integer, nullable=False, default=1)
+    balloon_pence = Column(Integer, nullable=False, default=0)  # PCP final payment
+
+    __table_args__ = (
+        CheckConstraint("start_balance_pence >= 0", name="ck_finance_schedule_balance"),
+        CheckConstraint("apr_bp >= 0", name="ck_finance_schedule_apr"),
+        CheckConstraint("payment_day BETWEEN 1 AND 31", name="ck_finance_schedule_day"),
+        CheckConstraint("balloon_pence >= 0", name="ck_finance_schedule_balloon"),
+    )
+
+
+class FinanceRepayment(TimestampMixin, Base):
+    """A payment against a liability: a linked transaction, or entered by hand."""
+
+    __tablename__ = "finance_repayments"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    amount_pence = Column(Integer, nullable=False)
+    note = Column(String, nullable=False, default="")
+    transaction_id = Column(String, ForeignKey("finance_transactions.id", ondelete="CASCADE"),
+                            nullable=True, unique=True)
+
+    __table_args__ = (
+        CheckConstraint("amount_pence > 0", name="ck_finance_repayment_positive"),
+    )
+
+
 class FinanceMeta(Base):
     """Finance schema bookkeeping (key/value), e.g. schema_version."""
 
@@ -244,7 +291,11 @@ V2_TABLES = [
     FinanceValuation.__table__,
     FinanceContribution.__table__,
 ]
-FINANCE_TABLES = V1_TABLES + V2_TABLES + [FinanceMeta.__table__]
+V3_TABLES = [
+    FinanceLoanSchedule.__table__,
+    FinanceRepayment.__table__,
+]
+FINANCE_TABLES = V1_TABLES + V2_TABLES + V3_TABLES + [FinanceMeta.__table__]
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()
 _ensure_lock = threading.Lock()

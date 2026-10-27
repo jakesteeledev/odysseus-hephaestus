@@ -121,3 +121,56 @@ def test_fresh_database_needs_no_backup(tmp_path):
     assert not backups.exists()
     assert "finance_accounts" in set(inspect(engine).get_table_names())
     engine.dispose()
+
+
+def _create_v2_schema(engine):
+    """Finance tables exactly as schema version 2 had them (before step 3)."""
+    from sqlalchemy.schema import CreateTable
+
+    from src.finance.models import V2_TABLES
+
+    with engine.begin() as conn:
+        for table in V1_TABLES + V2_TABLES:
+            ddl = str(CreateTable(table).compile(engine))
+            lines = [ln.rstrip().rstrip(",") for ln in ddl.strip().splitlines()]
+            if table.name == "finance_rules":
+                lines = [ln for ln in lines if "liability_id" not in ln]
+            if table.name == "finance_liabilities":
+                lines = [ln for ln in lines if "interest_bp" not in ln]
+            head, body, tail = lines[0], [ln for ln in lines[1:-1] if ln.strip()], lines[-1]
+            conn.execute(text(head + "\n" + ",\n".join(body) + "\n" + tail))
+        conn.execute(text("CREATE TABLE finance_meta (key VARCHAR PRIMARY KEY, value VARCHAR NOT NULL)"))
+        conn.execute(text("INSERT INTO finance_meta VALUES ('schema_version', '2')"))
+
+
+def test_upgrade_from_v2_adds_loans_and_keeps_data(tmp_path):
+    path = tmp_path / "app.db"
+    engine = _engine(path)
+    _create_v2_schema(engine)
+    rules_cols = {r[1] for r in engine.connect().execute(text("PRAGMA table_info(finance_rules)"))}
+    assert "liability_id" not in rules_cols
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO finance_categories (id, owner, name, kind, color, is_system, created_at, updated_at) "
+                          "VALUES ('c1', 'alice', 'Bills', 'expense', '', 0, '2026-01-01', '2026-01-01')"))
+        conn.execute(text("INSERT INTO finance_rules (id, owner, pattern, category_id, created_at, updated_at) "
+                          "VALUES ('r1', 'alice', 'octopus', 'c1', '2026-01-01', '2026-01-01')"))
+        conn.execute(text("INSERT INTO finance_liabilities (id, owner, name, liability_type, subtype, lender, notes, "
+                          "archived, created_at, updated_at) VALUES ('l1', 'alice', 'Car', 'loan', '', '', '', 0, "
+                          "'2026-01-01', '2026-01-01')"))
+    before = {t: sorted(engine.connect().execute(text(f"SELECT * FROM {t}")).fetchall())
+              for t in ("finance_rules", "finance_liabilities", "finance_categories")}
+    backups = tmp_path / "backups"
+    assert migrations._current_version(engine) == 2
+    assert migrations.migrate(engine, backup_dir=str(backups)) == migrations.SCHEMA_VERSION
+    assert [p.name.split("-to-")[0] for p in backups.iterdir()] == ["app-before-finance-v2"]
+    with engine.connect() as conn:
+        rules = conn.execute(text("SELECT id, pattern, category_id, liability_id FROM finance_rules")).fetchall()
+        assert rules == [("r1", "octopus", "c1", None)]
+        assert conn.execute(text("SELECT interest_bp FROM finance_liabilities")).fetchall() == [(None,)]
+        tables = set(inspect(engine).get_table_names())
+        for t, rows in before.items():
+            # Old columns keep their values; the new columns are empty.
+            cols = [r[1] for r in conn.execute(text(f"PRAGMA table_info({t})"))][:len(rows[0])]
+            assert sorted(conn.execute(text(f"SELECT {', '.join(cols)} FROM {t}")).fetchall()) == rows
+    assert {"finance_loan_schedules", "finance_repayments"} <= tables
+    engine.dispose()
