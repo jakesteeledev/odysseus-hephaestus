@@ -172,6 +172,7 @@ _register(
         "add_transfer",
         "update_valuation",
         "manage_recurring",
+        "set_budget",
     },
     ToolEffect.WRITE_PRIVATE,
 )

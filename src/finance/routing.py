@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 
 FINANCE_TOOLS = frozenset({"query_finances", "add_transaction", "add_transfer", "update_valuation",
-                           "manage_recurring"})
+                           "manage_recurring", "set_budget"})
 
 _MONEY_AMOUNT = r"(?:£\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s*(?:pounds?|quid|gbp)\b)"
 
@@ -36,12 +36,16 @@ FINANCE_FAMILY_PATTERN = (
     # v2 stage 3: recurring items.
     r"|\b(?:recurring|direct\s+debits?|standing\s+orders?|subscriptions|bills)\b"
     r"|\b(?:upcoming|regular)\s+(?:payments?|income)\b|\bcoming\s+out\s+of\s+my\b"
+    # v2 stage 4: budgets.
+    r"|\b(?:left\s+to\s+spend|overspent|over\s+budget|under\s+budget|spending\s+limit)\b"
 )
 FINANCE_FAMILY_RE = re.compile(FINANCE_FAMILY_PATTERN, re.I)
 
 _ASK = r"\b(?:what(?:'s|\s+is|\s+are|\s+was)?|show|tell\s+me|check|give\s+me|list)\b"
 # A message about email ("show me the email about my pension") stays with email.
 _NOT_EMAIL = r"^(?!.*\b(?:e-?mails?|inbox|mail|messages?)\b)"
+# "How much time/battery is left" is not a money question.
+_NOT_TIME = r"^(?!.*\b(?:time|timer|minutes?|hours?|days?|battery|storage|disk|space|tokens?|credits?)\b)"
 _V2_NOUNS = (r"assets|liabilit(?:y|ies)|debts?|loans?|mortgage|pensions?|isas?|investments|shares|crypto|"
              r"property|equity|student\s+loan")
 
@@ -53,7 +57,7 @@ FINANCE_INTENT_PATTERNS = tuple(
          rf"{_ASK}.{{0,40}}\bmy\s+(?:balances?|finances|savings|spending|outgoings|income|budget|"
          rf"bank\s+accounts?|credit\s+cards?|transactions|{_V2_NOUNS})\b"),
         ("worth question", r"\b(?:what(?:'s|\s+is)|how\s+much\s+is)\s+(?:my|our)\s+[\w\s]{1,30}?\bworth\b"),
-        ("how much owed question", r"\bhow\s+much\b.{0,30}\b(?:owe|owed|left\s+on|outstanding)\b"),
+        ("how much owed question", _NOT_TIME + r".*\bhow\s+much\b.{0,30}\b(?:owe|owed|left\s+on|outstanding)\b"),
         ("update value request",
          rf"\b(?:update|set|change)\b.{{0,50}}\b(?:to|at)\s+{_MONEY_AMOUNT}"),
         ("new value statement", rf"\bmy\b.{{0,40}}\b(?:is|are)\s+(?:now\s+)?(?:worth|at)\s+(?:about\s+)?{_MONEY_AMOUNT}"),
@@ -66,6 +70,12 @@ FINANCE_INTENT_PATTERNS = tuple(
          r"\b(?:my|list|show|what|which)\b.{0,20}\b(?:subscriptions|direct\s+debits|standing\s+orders|"
          r"recurring\s+(?:items|payments|bills))\b"),
         ("skip or confirm occurrence", r"\b(?:skip|confirm)\b.{0,40}\b(?:this|next|last)\s+(?:month|week)(?:'s)?\b"),
+        # "token budget" / "time budget" are settings, not money.
+        ("budget question",
+         r"\bmy\s+budgets?\b|\b(?!(?:token|tokens|time|context|compute|agent|round|tool|gpu|memory|"
+         r"the|a|an|this|that|your)\b)[a-z]+\s+budgets?\b"
+         r"|\b(?:left\s+to\s+spend|overspent|over\s+budget|under\s+budget|spending\s+limit)\b"),
+        ("money left question", _NOT_TIME + r".*\bhow\s+much\b.{0,30}\bleft\b.{0,30}\b(?:for|on|in)\b"),
         ("add recurring request",
          r"\b(?:add|set\s+up|create)\b.{0,30}\b(?:recurring|monthly|weekly|yearly|regular)\s+(?:payment|bill|subscription|income|direct\s+debit)\b"),
         ("how much spent/earned question",
@@ -90,6 +100,8 @@ FINANCE_KEYWORDS = (
     # v2 stage 3
     "recurring", "subscriptions", "direct debit", "direct debits", "standing order", "bills", "bills due",
     "upcoming payments",
+    # v2 stage 4
+    "budgets", "left to spend", "overspent", "over budget",
 )
 
 

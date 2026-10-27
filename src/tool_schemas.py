@@ -1583,8 +1583,8 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "view": {"type": "string", "enum": ["overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "summary", "transactions"],
-                             "description": "overview (default) = net worth breakdown and this month's totals; net_worth = assets minus liabilities by type; balances = per account; assets = property/investments/pensions/vehicles with values; liabilities = mortgage/loans/student loan/BNPL with balances owed; upcoming = bills and income due soon with projected month-end balances; summary = money in/out/net and spending by category for a period; transactions = recent entries."},
+                    "view": {"type": "string", "enum": ["overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "budgets", "summary", "transactions"],
+                             "description": "overview (default) = net worth breakdown and this month's totals; net_worth = assets minus liabilities by type; balances = per account; assets = property/investments/pensions/vehicles with values; liabilities = mortgage/loans/student loan/BNPL with balances owed; upcoming = bills and income due soon with projected month-end balances; budgets = each budget's spent, left and committed for a month; summary = money in/out/net and spending by category for a period; transactions = recent entries."},
                     "start": {"type": "string", "description": "Period start, YYYY-MM-DD (summary/transactions). Default: first day of this month."},
                     "end": {"type": "string", "description": "Period end, YYYY-MM-DD, inclusive. Default: last day of this month."},
                     "account": {"type": "string", "description": "Optional account name, e.g. 'savings' (partial names are fine)."},
@@ -1592,7 +1592,8 @@ FUNCTION_TOOL_SCHEMAS = [
                     "search": {"type": "string", "description": "Optional text to find in transaction descriptions."},
                     "name": {"type": "string", "description": "Optional asset or liability name to focus on (assets/liabilities views), e.g. 'car' or 'mortgage'."},
                     "limit": {"type": "integer", "description": "How many transactions to return (default 10, max 50)."},
-                    "days": {"type": "integer", "description": "For upcoming: how many days ahead (default 30; 7 for 'this week')."}
+                    "days": {"type": "integer", "description": "For upcoming: how many days ahead (default 30; 7 for 'this week')."},
+                    "month": {"type": "string", "description": "For budgets: YYYY-MM (default this month)."}
                 },
                 "required": []
             }
@@ -1673,6 +1674,22 @@ FUNCTION_TOOL_SCHEMAS = [
                     "due_date": {"type": "string", "description": "confirm/skip: which due date, YYYY-MM-DD (default the oldest one waiting)."}
                 },
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_budget",
+            "description": "Set or remove the user's monthly spending budget for one category (GBP), from this month onwards. Use the user's category name; ask if it is ambiguous. Never invent a category.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Spending category, e.g. 'groceries' or 'eating out'."},
+                    "amount": {"type": "string", "description": "Monthly limit in pounds, e.g. '300', or 'none' to remove the budget."},
+                    "month": {"type": "string", "description": "Optional YYYY-MM it starts from (default this month)."}
+                },
+                "required": ["category", "amount"]
             }
         }
     },

@@ -482,3 +482,47 @@ def test_manage_recurring_asks_when_unclear(bills):
     incomplete = run(tools.do_manage_recurring, {"action": "add", "name": "Gym"})
     assert incomplete["exit_code"] == 1 and "needs a name and an amount" in incomplete["error"]
     assert run(tools.do_manage_recurring, {"action": "explode"})["exit_code"] == 1
+
+
+# ── v2 stage 4: budgets in tools ───────────────────────────────────────
+
+
+@pytest.fixture
+def budgets(seeded, db_factory, monkeypatch):
+    from src.finance import budgets as bud
+    from src.finance import recurring as rec
+
+    for module in (bud, rec, fin):
+        monkeypatch.setattr(module, "_today_for_owner", lambda: TODAY)
+    db = db_factory()
+    bud.set_budget(db, OWNER, seeded["cats"]["Groceries"], "300")
+    bud.set_budget(db, OWNER, seeded["cats"]["Subscriptions"], "15")
+    rec.create_recurring(db, OWNER, name="Spotify", account_id=seeded["current"], amount="11.99",
+                         next_due="2026-10-30", category_id=seeded["cats"]["Subscriptions"])
+    db.commit()
+    db.close()
+
+
+def test_budgets_view(budgets):
+    result = run(tools.do_query_finances, {"view": "budgets"})
+    text = result["response"]
+    assert "Budgets for 2026-10:" in text
+    assert "- Groceries: spent £45.20 of £300.00, £254.80 left (on track)" in text
+    assert ("- Subscriptions: spent £9.99 of £15.00, £5.01 left; £11.99 more expected from recurring items, "
+            "leaving -£6.98 (close to the limit)") in text
+    one = run(tools.do_query_finances, {"view": "budgets", "category": "groceries"})
+    assert "Subscriptions" not in one["response"]
+    none = run(tools.do_query_finances, {"view": "budgets", "category": "eating out"})
+    assert none["exit_code"] == 1 and "no budget for 'eating out'" in none["error"]
+
+
+def test_set_budget(budgets):
+    result = run(tools.do_set_budget, {"category": "eating out", "amount": "120"})
+    assert result["exit_code"] == 0
+    assert result["response"] == "Eating out budget set to £120.00 a month from 2026-10 onwards (no rollover)."
+    removed = run(tools.do_set_budget, {"category": "groceries", "amount": "none", "month": "2026-11"})
+    assert removed["response"] == "Removed the Groceries budget from 2026-11 onwards."
+    assert run(tools.do_set_budget, {"category": "salary", "amount": "5"})["exit_code"] == 1  # income category
+    missing = run(tools.do_set_budget, {"category": "pets", "amount": "5"})
+    assert missing["exit_code"] == 1 and "Do not create a category" in missing["error"]
+    assert "What should the monthly budget be" in run(tools.do_set_budget, {"category": "health"})["error"]

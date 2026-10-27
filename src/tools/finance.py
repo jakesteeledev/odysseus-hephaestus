@@ -24,7 +24,8 @@ from src.tools._common import _parse_tool_args
 
 logger = logging.getLogger(__name__)
 
-QUERY_VIEWS = ("overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "summary", "transactions")
+QUERY_VIEWS = ("overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "budgets", "summary",
+               "transactions")
 _DEFAULT_TX_LIMIT = 10
 _MAX_TX_LIMIT = 50
 
@@ -176,7 +177,8 @@ async def do_query_finances(content, owner: Optional[str] = None) -> Dict:
             "asset": "assets", "investments": "assets", "pensions": "assets", "property": "assets",
             "liability": "liabilities", "debts": "liabilities", "debt": "liabilities", "loans": "liabilities",
             "owe": "liabilities", "mortgage": "liabilities", "bills": "upcoming", "recurring": "upcoming",
-            "due": "upcoming", "subscriptions": "upcoming", "scheduled": "upcoming"}.get(view, view)
+            "due": "upcoming", "subscriptions": "upcoming", "scheduled": "upcoming", "budget": "budgets",
+            "left": "budgets"}.get(view, view)
     if view not in QUERY_VIEWS:
         return _err(f"view must be one of: {', '.join(QUERY_VIEWS)}")
     try:
@@ -275,6 +277,41 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
         lines.append(f"Total across active accounts: {format_pence(overview['total_pence'])}")
         lines.append("Balances:")
         lines += _balances_text(accounts)
+
+    if view == "budgets":
+        from src.finance import budgets as bud
+
+        month = _first(args, "month")
+        start = bud.parse_month(month) if month is not None else None
+        status = bud.budget_status(db, owner, year=start.year if start else None,
+                                   month=start.month if start else None)
+        rows = status["budgets"]
+        if _first(args, "category"):
+            match = match_name(args["category"], rows)
+            if not match.ok:
+                if match.status == "ambiguous":
+                    return _err(f"'{args['category']}' matches more than one budget: {', '.join(match.options)}. "
+                                "Ask the user which one.")
+                names = ", ".join(r["name"] for r in rows) or "none yet"
+                return _err(f"There is no budget for '{args['category']}' in {status['month']}. Budgets: {names}. "
+                            "The user can set one with set_budget.")
+            rows = [match.item]
+        data["budgets"] = {**status, "budgets": rows}
+        if not rows:
+            lines.append(f"No budgets set for {status['month']}.")
+        else:
+            lines.append(f"Budgets for {status['month']}" + (" (month finished)" if status["is_past"] else "") + ":")
+            for r in rows:
+                state = {"over": "OVER BUDGET", "warning": "close to the limit", "ok": "on track"}[r["state"]]
+                line = (f"- {r['name']}: spent {format_pence(r['spent_pence'])} of {format_pence(r['limit_pence'])}, "
+                        + (f"{format_pence(r['remaining_pence'])} left" if r["remaining_pence"] >= 0
+                           else f"{format_pence(-r['remaining_pence'])} over"))
+                if r["committed_pence"]:
+                    line += (f"; {format_pence(r['committed_pence'])} more expected from recurring items, leaving "
+                             f"{format_pence(r['left_after_committed_pence'])}")
+                lines.append(f"{line} ({state})")
+            if not _first(args, "category") and status["unbudgeted_spent_pence"]:
+                lines.append(f"Spending in categories without a budget: {format_pence(status['unbudgeted_spent_pence'])}")
 
     if view == "upcoming":
         from src.finance import recurring as rec
@@ -714,3 +751,51 @@ async def do_manage_recurring(content, owner: Optional[str] = None) -> Dict:
     except Exception as exc:  # pragma: no cover - unexpected storage failure
         logger.exception("manage_recurring failed")
         return _err(f"Nothing saved: {exc}")
+
+
+# ── set_budget ──────────────────────────────────────────────────────────
+
+
+async def do_set_budget(content, owner: Optional[str] = None) -> Dict:
+    """Set or remove a monthly budget for a spending category."""
+    from src.finance import budgets as bud
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return _err("Invalid JSON arguments")
+    try:
+        owner = fin.resolve_owner(owner)
+        category_query = _first(args, "category", "name")
+        if category_query is None:
+            return _err("Nothing saved. Which category is the budget for? Ask the user.")
+        raw = _first(args, "amount", "limit", "budget")
+        if raw is None:
+            return _err("Nothing saved. What should the monthly budget be? Ask the user.")
+        remove = str(raw).strip().lower() in ("none", "remove", "delete", "off", "no budget")
+        with _session() as db:
+            categories = [c for c in fin.list_categories(db, owner) if c["kind"] == "expense"]
+            match = match_name(category_query, categories)
+            if not match.ok:
+                shown = ", ".join(match.options[:20])
+                if match.status == "ambiguous":
+                    return _err(f"Nothing saved. '{category_query}' matches more than one category: {shown}. "
+                                "Ask the user which one.")
+                return _err(f"Nothing saved. No spending category called '{category_query}'. Categories: {shown}. "
+                            "Ask the user which one. Do not create a category.")
+            category = match.item
+            row = bud.set_budget(db, owner, category["id"], None if remove else _amount_text(raw),
+                                 month=_first(args, "month"))
+            saved = {"category": category["name"], "month": row.month.isoformat()[:7], "limit_pence": row.limit_pence}
+            db.commit()
+    except fin.FinanceError as exc:
+        return _err(f"Nothing saved. {exc}")
+    except Exception as exc:  # pragma: no cover - unexpected storage failure
+        logger.exception("set_budget failed")
+        return _err(f"Nothing saved: {exc}")
+    if saved["limit_pence"] is None:
+        text = f"Removed the {saved['category']} budget from {saved['month']} onwards."
+    else:
+        text = (f"{saved['category']} budget set to {format_pence(saved['limit_pence'])} a month from "
+                f"{saved['month']} onwards (no rollover).")
+    return {"response": text, "data": saved, "exit_code": 0}

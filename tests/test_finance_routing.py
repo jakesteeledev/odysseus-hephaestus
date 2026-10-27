@@ -36,6 +36,11 @@ FINANCE_REQUESTS = [
     "skip netflix this month",
     "what direct debits do I have",
     "add a monthly payment of £10.99 for Netflix",
+    # v2 stage 4
+    "how much is left in my groceries budget?",
+    "how much have I got left for eating out",
+    "am I over budget this month?",
+    "set my groceries budget to £300",
 ]
 
 OTHER_REQUESTS = {
@@ -71,6 +76,7 @@ def test_other_requests_keep_their_own_tools(request_text, family):
 @pytest.mark.parametrize("request_text", [
     "what's the token budget setting", "how do I configure load balancing", "what is a credit score?",
     "set the CSS property to 10px", "what is a mortgage?", "what tasks are due tomorrow",
+    "increase the agent token budget to 8000", "how much time is left on my timer",
 ])
 def test_non_money_questions_are_not_promoted_to_finance(request_text):
     assert classify_tool_intent(request_text).category != "finance"
@@ -78,7 +84,7 @@ def test_non_money_questions_are_not_promoted_to_finance(request_text):
 
 def test_finance_family_registers_the_three_tools():
     assert FAMILY_TOOLS["finance"] == FINANCE_TOOLS == {"query_finances", "add_transaction", "add_transfer",
-                                                          "update_valuation", "manage_recurring"}
+                                                          "update_valuation", "manage_recurring", "set_budget"}
     names = {s["function"]["name"] for s in FUNCTION_TOOL_SCHEMAS}
     assert FINANCE_TOOLS <= names
 
@@ -117,7 +123,7 @@ def test_plan_mode_blocks_finance_writes():
     from src.tool_security import plan_mode_disabled_tools
 
     disabled = plan_mode_disabled_tools()
-    assert {"add_transaction", "add_transfer", "update_valuation", "manage_recurring"} <= disabled
+    assert {"add_transaction", "add_transfer", "update_valuation", "manage_recurring", "set_budget"} <= disabled
     assert "query_finances" not in disabled
 
 

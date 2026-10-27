@@ -410,6 +410,8 @@ _TOOL_NAME_MAP = {
     "update_valuation": "update_valuation",
     "manage_recurring": "manage_recurring",
     "recurring": "manage_recurring",
+    "set_budget": "set_budget",
+    "budget": "set_budget",
     "manage_bg_jobs": "manage_bg_jobs",
     "bg_jobs": "manage_bg_jobs",
     "background_jobs": "manage_bg_jobs",
