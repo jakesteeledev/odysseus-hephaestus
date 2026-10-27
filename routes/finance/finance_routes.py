@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from core.database import SessionLocal, engine
 from src.auth_helpers import require_user
 from src.finance import csv_io, imports
+from src.finance import networth as nw
 from src.finance import service as fin
 from src.finance.models import ACCOUNT_TYPES, CATEGORY_COLORS, ensure_tables
 
@@ -107,6 +108,45 @@ class RuleUpdate(BaseModel):
 class MappingSave(BaseModel):
     name: str
     config: Dict[str, Any]
+
+
+class ItemCreate(BaseModel):
+    name: str
+    type: str = "other"
+    subtype: str = ""
+    provider: str = ""
+    lender: str = ""
+    notes: str = ""
+    linked_asset_id: Optional[str] = None
+    value: Optional[str] = None
+    value_date: Optional[str] = None
+
+
+class ItemUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    subtype: Optional[str] = None
+    provider: Optional[str] = None
+    lender: Optional[str] = None
+    notes: Optional[str] = None
+    archived: Optional[bool] = None
+    linked_asset_id: Optional[str] = None
+
+
+class ValuationCreate(BaseModel):
+    value: str
+    date: Optional[str] = None
+    note: str = ""
+
+
+class ContributionCreate(BaseModel):
+    amount: str
+    date: Optional[str] = None
+    note: str = ""
+
+
+class ContributionLink(BaseModel):
+    asset_id: Optional[str] = None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -413,5 +453,104 @@ def setup_finance_routes() -> APIRouter:
         with _session() as db:
             imports.delete_mapping(db, owner, mapping_id)
             return {"ok": True}
+
+    # Net worth, assets and liabilities (v2)
+
+    @router.get("/networth")
+    def networth(request: Request, as_of: Optional[str] = None):
+        owner = _owner(request)
+        with _session() as db:
+            return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"))
+
+    # Specific paths before the generic /{collection}/{item_id} routes below.
+    @router.delete("/valuations/{valuation_id}")
+    def delete_valuation(valuation_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            nw.delete_valuation(db, owner, valuation_id)
+            return {"ok": True}
+
+    @router.delete("/contributions/{contribution_id}")
+    def delete_contribution(contribution_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            nw.delete_contribution(db, owner, contribution_id)
+            return {"ok": True}
+
+    def _kind(collection: str) -> str:
+        if collection not in ("assets", "liabilities"):
+            raise HTTPException(404, "not found")
+        return "asset" if collection == "assets" else "liability"
+
+    @router.get("/{collection}")
+    def list_items(collection: str, request: Request, include_archived: bool = False):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            return {collection: nw.list_items(db, owner, kind, include_archived=include_archived)}
+
+    @router.post("/{collection}")
+    def create_item(collection: str, body: ItemCreate, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        data = body.model_dump()
+        if kind == "asset":
+            data.pop("lender"); data.pop("linked_asset_id")
+        else:
+            data.pop("provider")
+        with _session() as db:
+            item = nw.create_item(db, owner, kind, **data)
+            return nw._item_dict(db, owner, kind, item, None)
+
+    @router.patch("/{collection}/{item_id}")
+    def update_item(collection: str, item_id: str, body: ItemUpdate, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            item = nw.update_item(db, owner, kind, item_id, **_changes(body))
+            return nw._item_dict(db, owner, kind, item, None)
+
+    @router.delete("/{collection}/{item_id}")
+    def delete_item(collection: str, item_id: str, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            nw.delete_item(db, owner, kind, item_id)
+            return {"ok": True}
+
+    @router.get("/{collection}/{item_id}/valuations")
+    def list_valuations(collection: str, item_id: str, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            return {"valuations": nw.list_valuations(db, owner, kind, item_id)}
+
+    @router.post("/{collection}/{item_id}/valuations")
+    def add_valuation(collection: str, item_id: str, body: ValuationCreate, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            snap = nw.set_valuation(db, owner, kind, item_id, value=body.value, on=body.date, note=body.note)
+            return nw.valuation_to_dict(snap)
+
+    @router.get("/assets/{asset_id}/contributions")
+    def list_contributions(asset_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return {"contributions": nw.list_contributions(db, owner, asset_id)}
+
+    @router.post("/assets/{asset_id}/contributions")
+    def add_contribution(asset_id: str, body: ContributionCreate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return nw.contribution_to_dict(nw.add_contribution(db, owner, asset_id, amount=body.amount,
+                                                               on=body.date, note=body.note))
+
+    @router.put("/transactions/{transaction_id}/contribution")
+    def link_contribution(transaction_id: str, body: ContributionLink, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            row = nw.link_transaction_contribution(db, owner, transaction_id, body.asset_id)
+            return {"contribution": nw.contribution_to_dict(row) if row else None}
 
     return router
