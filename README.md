@@ -1,3 +1,18 @@
+> [!NOTE]
+> **This is Odysseus-Hephaestus**, a personal fork of [Odysseus](https://github.com/odysseus-dev/odysseus).
+> All credit for Odysseus goes to its authors and contributors; this fork only adds a few changes on top.
+> It is a modified version, first changed in October 2026, and is distributed under the same
+> [GNU AGPL v3](LICENSE) licence as the original. See [FORK.md](FORK.md) for how it tracks upstream.
+>
+> **What's different from upstream:**
+> - **Hephaestus theme** built in and used by default: dark brown, cream text, orange accents fading to gold, orange Embers background. All original themes are still available.
+> - **Calendar:** the event tag and importance chosen in the UI are saved; the agent infers a tag when none is given.
+> - **Agent:** requests that list several items ("add these two events") are carried through; follow-ups like "you forgot the other one?" keep the tools of the previous request.
+> - **Approvals:** typing "yes" or "no" answers a waiting approval card.
+> - **Web tools:** web search and fetch are always allowed, and fetching a link returned by web search does not need another approval.
+>
+> Changes to upstream files are marked with `HEPHAESTUS PATCH` comments.
+
 <p align="center">
   <img src="assets/branding/odysseus-wordmark.png" alt="Odysseus" width="238">
 </p>
