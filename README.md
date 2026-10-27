@@ -1,3 +1,11 @@
+<p align="center">
+  <img src="assets/branding/odysseus-wordmark.png" alt="Odysseus" width="238">
+</p>
+
+<p align="center">
+  A self-hosted AI workspace for chat, agents, research, documents, email, notes, calendar, and local model workflows.
+</p>
+
 > [!NOTE]
 > **This is Odysseus-Hephaestus**, a personal fork of [Odysseus](https://github.com/odysseus-dev/odysseus).
 > All credit for Odysseus goes to its authors and contributors; this fork only adds a few changes on top.
@@ -12,14 +20,6 @@
 > - **Web tools:** web search and fetch are always allowed, and fetching a link returned by web search does not need another approval.
 >
 > Changes to upstream files are marked with `HEPHAESTUS PATCH` comments.
-
-<p align="center">
-  <img src="assets/branding/odysseus-wordmark.png" alt="Odysseus" width="238">
-</p>
-
-<p align="center">
-  A self-hosted AI workspace for chat, agents, research, documents, email, notes, calendar, and local model workflows.
-</p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
