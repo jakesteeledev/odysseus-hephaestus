@@ -12,6 +12,59 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Dict, Optional
 
 from src.tools._common import _parse_tool_args
+
+
+# HEPHAESTUS PATCH: event tags. EVENT_TYPES are the tags the calendar UI colours.
+# The model should pick a tag from context (see the manage_calendar schema);
+# guess_event_type is the fallback when it leaves the tag out.
+EVENT_TYPES = ("work", "personal", "health", "travel", "meal", "social", "admin", "other")
+_EVENT_TYPE_SYNONYMS = {
+    "job": "work", "career": "work", "business": "work", "office": "work",
+    "fun": "social", "leisure": "social", "entertainment": "social", "friends": "social",
+    "cinema": "social", "movie": "social", "film": "social", "event": "social",
+    "medical": "health", "fitness": "health", "doctor": "health",
+    "family": "personal", "home": "personal", "errand": "personal", "errands": "personal",
+    "trip": "travel", "holiday": "travel", "vacation": "travel",
+    "food": "meal", "dining": "meal", "finance": "admin", "bills": "admin", "paperwork": "admin",
+}
+# Checked in order: the first match wins, so "work dinner" is work, not meal.
+_EVENT_TYPE_KEYWORDS = tuple((tag, re.compile(pattern, re.IGNORECASE)) for tag, pattern in (
+    ("travel", r"\b(?:flights?|fly(?:ing)? to|airport|train to|trip|holiday|vacation|hotel|"
+               r"check[- ]?in|ferry|road ?trip|travel(?:ling|ing)?)\b"),
+    ("health", r"\b(?:doctors?|gp|dentist|hospital|clinic|physio\w*|therap(?:y|ist)|vaccin\w*|"
+               r"check[- ]?up|gym|workout|surgery|optician|blood test|scan)\b"),
+    ("work", r"\b(?:new job|job|work|office|shift|meetings?|stand[- ]?up|interview|client|"
+             r"conference|onboarding|induction|training|presentation|appraisal|1:1|"
+             r"performance review|deadline at work)\b"),
+    ("social", r"\b(?:cinema|movies?|films?|watching|vue|odeon|cineworld|imax|concert|gig|"
+               r"festival|theat(?:re|er)|musical|party|birthday|wedding|drinks|pub|bar|"
+               r"hang ?out|friends?|date night|bbq|barbecue|game night|match|football)\b"),
+    ("meal", r"\b(?:lunch|dinner|breakfast|brunch|coffee|restaurant)\b"),
+    ("admin", r"\b(?:bills?|renew(?:al)?|tax|payment|insurance|mot|council|passport|visa|"
+              r"licen[cs]e|bank|deadline)\b"),
+    ("personal", r"\b(?:family|mum|mom|dad|parents|kids|school|haircut|barber|errands?|"
+                 r"cleaning|vet|delivery|moving)\b"),
+))
+
+
+def normalize_event_type(value) -> Optional[str]:
+    """Lower-case a tag and map common synonyms onto the UI's tags.
+
+    Unknown custom tags are kept (lower-cased); empty means no tag.
+    """
+    tag = str(value or "").strip().lstrip("#").lower()
+    if not tag:
+        return None
+    return tag if tag in EVENT_TYPES else _EVENT_TYPE_SYNONYMS.get(tag, tag)
+
+
+def guess_event_type(*texts) -> Optional[str]:
+    """Keyword guess at a tag from the event's title, location and notes."""
+    text = " ".join(str(t or "") for t in texts)
+    for tag, pattern in _EVENT_TYPE_KEYWORDS:
+        if pattern.search(text):
+            return tag
+    return None
 from src.tool_utils import get_upload_handler
 from src.upload_handler import reserve_upload_references
 
@@ -591,13 +644,18 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None, *, impor
                 }
 
             # Optional tag/category and importance — friendly aliases.
-            event_type = (args.get("event_type") or args.get("tag")
-                          or args.get("category") or args.get("type") or "") or None
+            event_type = normalize_event_type(args.get("event_type") or args.get("tag")
+                                              or args.get("category") or args.get("type"))
             importance = args.get("importance") or "normal"
             minutes_before = _reminder_minutes(args)
 
             event_description = _event_description(args, minutes_before)
             event_location = args.get("location", "") or ""
+            if not event_type:
+                # HEPHAESTUS PATCH: the model left the tag out, so guess one.
+                event_type = guess_event_type(summary, event_location, args.get("description"))
+                if event_type:
+                    logger.info("[calendar] auto-tagged %r as %s", summary, event_type)
             missing_id = reserve_upload_references(
                 get_upload_handler(),
                 owner,
@@ -746,7 +804,7 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None, *, impor
             _tag = (args.get("event_type") or args.get("tag")
                     or args.get("category") or args.get("type"))
             if _tag is not None:
-                ev.event_type = _tag or None
+                ev.event_type = normalize_event_type(_tag)  # HEPHAESTUS PATCH
             if args.get("importance") is not None:
                 ev.importance = args["importance"]
             for field in ("source_email_uid", "source_email_folder", "source_email_account_id", "source_email_message_id"):

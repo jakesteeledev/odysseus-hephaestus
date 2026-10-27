@@ -208,6 +208,9 @@ class EventCreate(BaseModel):
     rrule: Optional[str] = None
     color: Optional[str] = None  # per-event color override
     reminder_minutes: Optional[int] = None
+    # HEPHAESTUS PATCH: the calendar UI sends these; they used to be dropped.
+    event_type: Optional[str] = None
+    importance: Optional[str] = None
 
 
 class EventUpdate(BaseModel):
@@ -220,6 +223,18 @@ class EventUpdate(BaseModel):
     rrule: Optional[str] = None
     color: Optional[str] = None
     reminder_minutes: Optional[int] = None
+    # HEPHAESTUS PATCH: the calendar UI sends these; they used to be dropped.
+    event_type: Optional[str] = None
+    importance: Optional[str] = None
+
+
+_EVENT_IMPORTANCE = frozenset({"low", "normal", "high", "critical"})
+
+
+def _clean_importance(value):
+    """HEPHAESTUS PATCH: a valid importance level, or None to leave it unchanged."""
+    value = str(value or "").strip().lower()
+    return value if value in _EVENT_IMPORTANCE else None
 
 
 # ── Helpers ──
@@ -1387,6 +1402,10 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
                 color=data.color or None,
                 caldav_sync_pending="create" if cal.source == "caldav" else None,
             )
+            # HEPHAESTUS PATCH: keep the tag and importance chosen in the UI.
+            from src.tools.calendar import normalize_event_type
+            ev.event_type = normalize_event_type(data.event_type)
+            ev.importance = _clean_importance(data.importance) or "normal"
             db.add(ev)
             reminder = None
             if data.reminder_minutes is not None:
@@ -1459,6 +1478,12 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
                 ev.color = data.color if data.color else None
             reminder = None
             reminder_fields = getattr(data, "model_fields_set", getattr(data, "__fields_set__", set()))
+            # HEPHAESTUS PATCH: save the tag/importance; an empty tag clears it.
+            if "event_type" in reminder_fields:
+                from src.tools.calendar import normalize_event_type
+                ev.event_type = normalize_event_type(data.event_type)
+            if _clean_importance(data.importance):
+                ev.importance = _clean_importance(data.importance)
             if "reminder_minutes" in reminder_fields:
                 _delete_calendar_reminders_for_event(db, owner, ev)
                 if data.reminder_minutes is not None:
