@@ -210,6 +210,76 @@
     {
       "source": "shared/ui/confetti.js",
       "deployment": "js/shared/ui/confetti.js"
+    },
+    {
+      "source": "features/finance/domain/money.js",
+      "deployment": "js/features/finance/domain/money.js"
+    },
+    {
+      "source": "features/finance/domain/csvHeader.js",
+      "deployment": "js/features/finance/domain/csvHeader.js"
+    },
+    {
+      "source": "features/finance/infrastructure/http.js",
+      "deployment": "js/features/finance/infrastructure/http.js"
+    },
+    {
+      "source": "features/finance/infrastructure/storage.js",
+      "deployment": "js/features/finance/infrastructure/storage.js"
+    },
+    {
+      "source": "features/finance/application/state.js",
+      "deployment": "js/features/finance/application/state.js"
+    },
+    {
+      "source": "features/finance/ui/dom.js",
+      "deployment": "js/features/finance/ui/dom.js"
+    },
+    {
+      "source": "features/finance/ui/entryForm.js",
+      "deployment": "js/features/finance/ui/entryForm.js"
+    },
+    {
+      "source": "features/finance/ui/accountsView.js",
+      "deployment": "js/features/finance/ui/accountsView.js"
+    },
+    {
+      "source": "features/finance/ui/transactionsView.js",
+      "deployment": "js/features/finance/ui/transactionsView.js"
+    },
+    {
+      "source": "features/finance/ui/importView.js",
+      "deployment": "js/features/finance/ui/importView.js"
+    },
+    {
+      "source": "features/finance/ui/settingsView.js",
+      "deployment": "js/features/finance/ui/settingsView.js"
+    },
+    {
+      "source": "features/finance/ui/panel.js",
+      "deployment": "js/features/finance/ui/panel.js"
+    },
+    {
+      "source": "features/finance/index.js",
+      "deployment": "js/features/finance/index.js",
+      "legacyImports": [
+        {
+          "specifier": "/static/js/ui.js?v=20260916largetoolscroll1",
+          "reason": "Existing shared UI/platform identity, injected at Finance composition. Remove when that shared responsibility migrates to maintained source."
+        },
+        {
+          "specifier": "/static/js/modalManager.js",
+          "reason": "Existing shared UI/platform identity, injected at Finance composition. Remove when that shared responsibility migrates to maintained source."
+        },
+        {
+          "specifier": "/static/js/windowDrag.js",
+          "reason": "Existing shared UI/platform identity, injected at Finance composition. Remove when that shared responsibility migrates to maintained source."
+        },
+        {
+          "specifier": "/static/js/spinner.js",
+          "reason": "Existing shared UI/platform identity, injected at Finance composition. Remove when that shared responsibility migrates to maintained source."
+        }
+      ]
     }
   ]
 }

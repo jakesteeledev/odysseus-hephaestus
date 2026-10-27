@@ -349,6 +349,11 @@ const _ROUTE_FAVICON_SHAPES = {
     "<line x1='10' y1='10' x2='22' y2='10' stroke='__C__' stroke-width='2'/>" +
     "<line x1='10' y1='15' x2='22' y2='15' stroke='__C__' stroke-width='2'/>" +
     "<line x1='10' y1='20' x2='18' y2='20' stroke='__C__' stroke-width='2'/>",
+  // HEPHAESTUS PATCH: finance route favicon (wallet), mirrored in index.html.
+  '/finance':
+    "<rect x='4' y='8' width='24' height='18' rx='3' fill='none' stroke='__C__' stroke-width='2.5'/>" +
+    "<path d='M28 14 L21 14 A3 3 0 0 0 21 20 L28 20' fill='none' stroke='__C__' stroke-width='2'/>" +
+    "<line x1='8' y1='4' x2='22' y2='4' stroke='__C__' stroke-width='2.5' stroke-linecap='round'/>",
   '/cookbook':
     "<path d='M5 8 L5 26 A2 2 0 0 0 7 28 L25 28 A2 2 0 0 0 27 26 L27 8' fill='none' stroke='__C__' stroke-width='2.5' stroke-linejoin='round'/>" +
     "<path d='M9 4 L23 4 L23 8 L9 8 Z' fill='none' stroke='__C__' stroke-width='2.5' stroke-linejoin='round'/>" +

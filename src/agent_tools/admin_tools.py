@@ -735,6 +735,7 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 "image": ["generate_image"],
                 "tasks": ["manage_tasks"],
                 "notes": ["manage_notes"],
+                "finance": ["query_finances", "add_transaction", "add_transfer"],  # HEPHAESTUS PATCH
                 "calendar": ["manage_calendar"],
                 # The full built-in email tool set, in BOTH spellings: the
                 # qualified mcp__email__* names drive MCP schema hiding, the

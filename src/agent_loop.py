@@ -21,6 +21,8 @@ import shutil
 import time
 import logging
 import hashlib
+# HEPHAESTUS PATCH: finance tracker vocabulary.
+from src.finance.routing import FINANCE_KEYWORDS, FINANCE_TOOLS
 from src.web_recovery import WebRecoveryBudget
 from itertools import count
 from datetime import date, datetime, timedelta
@@ -825,6 +827,9 @@ _QWEN38_TOOL_ROUTER_PROMPT = (
     "task_type, schedule, scheduled_time, output_target; pause/resume/delete "
     "use task_id, so list/search first when only name is known. manage_memory: saved memories. "
     "manage_contact: address-book contacts. manage_research: saved research reports. "
+    # HEPHAESTUS PATCH: finance tracker tools.
+    "query_finances: net worth, balances, spending/income totals, recent transactions; "
+    "add_transaction/add_transfer: record money in/out or a transfer between the user's accounts. "
     "manage_settings: app settings. manage_endpoints: configured API endpoints; list_models: available models. "
     "manage_mcp: MCP servers. manage_skills: skills. manage_webhooks: webhooks. manage_bg_jobs: running/background jobs. "
     "search_chats: past chats. web_search: public web lookup, URLs, links; web_fetch: fetch a concrete URL/domain. "
@@ -870,6 +875,9 @@ _QWEN38_ROUTER_KEYWORD_TOOLS = (
     (("task", "tasks", "reminder", "remind me", "recurring", "every morning", "every weekday"), {"manage_tasks"}),
     (("note", "notes", "todo", "checklist"), {"manage_notes", "notes_list", "notes_get", "notes_create", "notes_update", "notes_delete"}),
     (("contact", "contacts", "address book", "phone number"), {"manage_contact"}),
+    # HEPHAESTUS PATCH: finance tracker. Listed before email so "subscriptions"
+    # spending questions also offer the finance tools.
+    (FINANCE_KEYWORDS, set(FINANCE_TOOLS)),
     (("email", "emails", "mail", "inbox", "gmail", "message", "messages", "sender", "senders", "block sender", "attachment", "attachments", "attached", "pdf", "receipt", "receipts", "invoice", "invoices", "zip receipts", "newsletter", "unsubscribe", "unsubscribes", "subscription", "spam", "phishing", "junk", "blocked sender", "blocked senders", "unblock", "favorite", "unfavorite", "unarchive", "unread", "done", "undone", "writing style", "reply style"), {"list_email_accounts", "mcp__email__list_emails", "mcp__email__read_email", "mcp__email__search_emails", "mcp__email__download_attachment", "mcp__email__draft_email", "mcp__email__draft_email_reply", "mcp__email__scan_email_unsubscribes", "mcp__email__unsubscribe_email", "mcp__email__scan_spam", "mcp__email__block_sender", "mcp__email__manage_email_state", "manage_settings"}),
     (("calendar", "event", "schedule", "appointment", "meeting"), {"manage_calendar", "calendar_list_events", "calendar_get_event", "calendar_create_event", "calendar_update_event", "calendar_delete_event"}),
     (("memory", "memories", "remember", "brain"), {"manage_memory"}),

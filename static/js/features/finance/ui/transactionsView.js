@@ -1,0 +1,183 @@
+/** Transactions by month with previous/next, filters, search, and tap-to-edit. */
+
+import { dayLabel, monthLabel } from '../domain/money.js';
+import { ICONS, amountHtml, categoryDot, emptyHtml, esc, optionsHtml } from './dom.js';
+
+export function createMonthNav({ app }) {
+  function html() {
+    return `
+      <div class="fin-month-nav">
+        <button type="button" class="memory-item-btn fin-nav-btn" data-month="-1" title="Previous month" aria-label="Previous month">${ICONS.prev()}</button>
+        <span class="fin-month-label">${esc(monthLabel(app.state.month))}</span>
+        <button type="button" class="memory-item-btn fin-nav-btn" data-month="1" title="Next month" aria-label="Next month">${ICONS.next()}</button>
+      </div>`;
+  }
+  function wire(container) {
+    container.querySelectorAll('[data-month]').forEach((b) => b.addEventListener('click', () => {
+      app.shiftMonth(Number(b.dataset.month));
+    }));
+  }
+  return { html, wire };
+}
+
+export function createTransactionsView({ app, entryForm, monthNav }) {
+  let editingId = null;
+  let searchTimer = null;
+
+  function rowHtml(tx) {
+    const account = app.accountById(tx.account_id);
+    let label;
+    let dot;
+    if (tx.transfer_id) {
+      const other = app.accountById(tx.transfer_account_id);
+      label = `${tx.direction === 'out' ? 'Transfer to' : 'Transfer from'} ${other ? other.name : 'account'}`;
+      dot = `<span class="fin-dot-icon" aria-hidden="true">${ICONS.transfer()}</span>`;
+    } else {
+      const category = app.categoryById(tx.category_id);
+      label = category ? category.name : 'Uncategorised';
+      dot = categoryDot(category?.color);
+    }
+    const sub = [label, app.state.filters.accountId ? '' : account?.name].filter(Boolean).join(' · ');
+    return `
+      <div class="memory-item fin-row fin-tx-row" data-tx-id="${esc(tx.id)}" role="button" tabindex="0">
+        ${dot}
+        <div class="fin-row-main">
+          <span class="memory-item-title">${esc(tx.description || (tx.transfer_id ? 'Transfer' : '(no description)'))}</span>
+          <span class="fin-row-sub">${esc(sub)}${tx.import_batch_id ? ' · imported' : ''}</span>
+        </div>
+        ${amountHtml(tx.amount_pence, tx.direction)}
+      </div>`;
+  }
+
+  function listHtml() {
+    const { transactions } = app.state;
+    if (!transactions.length) {
+      const f = app.state.filters;
+      const filtered = f.accountId || f.categoryId || f.direction || f.q;
+      return emptyHtml(filtered ? 'No transactions match these filters.' : 'No transactions this month.');
+    }
+    const parts = [];
+    let day = null;
+    for (const tx of transactions) {
+      if (tx.date !== day) {
+        day = tx.date;
+        parts.push(`<div class="fin-day-head">${esc(dayLabel(day))}</div>`);
+      }
+      if (tx.id === editingId) {
+        parts.push(`<div class="memory-item fin-edit-card" data-edit-slot></div>`);
+      } else {
+        parts.push(rowHtml(tx));
+      }
+    }
+    return parts.join('');
+  }
+
+  function render(container) {
+    const { state } = app;
+    const f = state.filters;
+    const accountItems = state.accounts.filter((a) => !a.archived || a.id === f.accountId)
+      .map((a) => ({ value: a.id, label: a.name }));
+    const categoryItems = state.categories.map((c) => ({ value: c.id, label: c.name }));
+    container.innerHTML = `
+      <div class="admin-card fin-card">
+        ${monthNav.html()}
+        <div class="fin-filters">
+          <select class="task-form-input" data-filter="accountId" aria-label="Account">${optionsHtml(accountItems, f.accountId, { blank: 'All accounts' })}</select>
+          <select class="task-form-input" data-filter="categoryId" aria-label="Category">${optionsHtml(categoryItems, f.categoryId, { blank: 'All categories' })}</select>
+          <div class="task-form-toggle fin-dir-toggle" role="radiogroup" aria-label="Direction">
+            <button type="button" class="task-toggle-btn${f.direction === '' ? ' active' : ''}" data-direction="">All</button>
+            <button type="button" class="task-toggle-btn${f.direction === 'in' ? ' active' : ''}" data-direction="in">In</button>
+            <button type="button" class="task-toggle-btn${f.direction === 'out' ? ' active' : ''}" data-direction="out">Out</button>
+          </div>
+          <input type="search" class="memory-search-input fin-search" placeholder="Search descriptions" value="${esc(f.q)}" aria-label="Search descriptions">
+        </div>
+        <div class="memory-list fin-list" data-tx-list>${listHtml()}</div>
+      </div>`;
+    wire(container);
+  }
+
+  function wire(container) {
+    monthNav.wire(container);
+    container.querySelectorAll('select[data-filter]').forEach((sel) => sel.addEventListener('change', () => {
+      editingId = null;
+      app.setFilters({ [sel.dataset.filter]: sel.value });
+    }));
+    container.querySelectorAll('[data-direction]').forEach((b) => b.addEventListener('click', () => {
+      editingId = null;
+      app.setFilters({ direction: b.dataset.direction });
+    }));
+    const search = container.querySelector('.fin-search');
+    search.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        editingId = null;
+        app.setFilters({ q: search.value.trim() }).then(() => {
+          // Keep typing focus after the list re-renders.
+          const again = container.querySelector('.fin-search');
+          if (again && document.activeElement !== again) {
+            again.focus();
+            again.setSelectionRange(again.value.length, again.value.length);
+          }
+        });
+      }, 250);
+    });
+    container.querySelectorAll('[data-tx-id]').forEach((row) => {
+      const open = () => { editingId = row.dataset.txId; render(container); };
+      row.addEventListener('click', open);
+      row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
+    const slot = container.querySelector('[data-edit-slot]');
+    if (slot) {
+      const tx = app.state.transactions.find((t) => t.id === editingId);
+      const close = () => { editingId = null; render(container); };
+      entryForm.render(slot, { existing: tx, onDone: close, onCancel: close });
+      slot.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  return { render, reset: () => { editingId = null; }, isEditing: () => editingId !== null };
+}
+
+export function createSummaryView({ app, monthNav }) {
+  function render(container) {
+    const s = app.state.summary;
+    const accountItems = app.state.accounts.filter((a) => !a.archived || a.id === app.state.filters.accountId)
+      .map((a) => ({ value: a.id, label: a.name }));
+    let body;
+    if (!s) {
+      body = emptyHtml('Loading…');
+    } else {
+      const spend = s.spend_by_category;
+      const biggest = spend.reduce((max, c) => Math.max(max, c.total_pence), 0) || 1;
+      body = `
+        <div class="fin-stats">
+          <div class="fin-stat"><span class="fin-stat-label">Money in</span>${amountHtml(s.total_in_pence, 'in')}</div>
+          <div class="fin-stat"><span class="fin-stat-label">Money out</span>${amountHtml(s.total_out_pence, 'out')}</div>
+          <div class="fin-stat"><span class="fin-stat-label">Net</span>${amountHtml(Math.abs(s.net_pence), s.net_pence >= 0 ? 'in' : 'out')}</div>
+        </div>
+        <h3 class="fin-section-title">Spending by category</h3>
+        ${spend.length ? `<div class="fin-breakdown">${spend.map((c) => `
+          <div class="fin-breakdown-row">
+            ${categoryDot(c.color)}
+            <span class="fin-breakdown-name">${esc(c.name)}</span>
+            <span class="fin-breakdown-count">${c.count}</span>
+            ${amountHtml(c.total_pence, 'out')}
+            <span class="fin-bar"><span class="fin-bar-fill${c.color ? ` fin-color-${esc(c.color)}` : ''}" style="width:${Math.max(2, Math.round((c.total_pence / biggest) * 100))}%"></span></span>
+          </div>`).join('')}</div>` : emptyHtml('No spending this month.')}
+        <div class="fin-hint">Transfers between your accounts are not counted as money in or out.</div>`;
+    }
+    container.innerHTML = `
+      <div class="admin-card fin-card">
+        ${monthNav.html()}
+        <div class="fin-filters">
+          <select class="task-form-input" data-summary-account aria-label="Account">${optionsHtml(accountItems, app.state.filters.accountId, { blank: 'All accounts' })}</select>
+        </div>
+        ${body}
+      </div>`;
+    monthNav.wire(container);
+    container.querySelector('[data-summary-account]').addEventListener('change', (e) => {
+      app.setFilters({ accountId: e.target.value });
+    });
+  }
+  return { render };
+}

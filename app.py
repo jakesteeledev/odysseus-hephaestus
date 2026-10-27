@@ -900,6 +900,10 @@ logger.info("Webhook & API token routes initialized")
 from routes.note.note_routes import setup_note_routes
 app.include_router(setup_note_routes(task_scheduler, upload_handler=upload_handler))
 
+# HEPHAESTUS PATCH: personal finance tracker (routes/finance, src/finance).
+from routes.finance.finance_routes import setup_finance_routes
+app.include_router(setup_finance_routes())
+
 # Email
 from routes.email_routes import setup_email_routes
 email_router = setup_email_routes()
@@ -950,6 +954,11 @@ async def serve_notes(request: Request):
 
 @app.get("/calendar")
 async def serve_calendar(request: Request):
+    return await serve_index(request)
+
+# HEPHAESTUS PATCH: finance tracker deep link.
+@app.get("/finance")
+async def serve_finance(request: Request):
     return await serve_index(request)
 
 # Per-tool deep-link routes — all serve the same SPA, the JS auto-opens

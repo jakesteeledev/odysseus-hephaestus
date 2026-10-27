@@ -73,6 +73,10 @@ def web_intent_may_enable_for_turn(
 
 
 _COMMON_TOOL_NAMES = {
+    # HEPHAESTUS PATCH: finance tracker tools.
+    "query_finances",
+    "add_transaction",
+    "add_transfer",
     "api_call",
     "app_api",
     "archive_email",

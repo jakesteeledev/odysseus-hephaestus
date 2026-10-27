@@ -11,6 +11,9 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Pattern
 
+# HEPHAESTUS PATCH: finance vocabulary shared with the turn contract.
+from src.finance.routing import FINANCE_INTENT_PATTERNS
+
 
 @dataclass(frozen=True)
 class ToolIntent:
@@ -83,6 +86,10 @@ _CODE_WORKSPACE_TARGET = (
 _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
     (category, reason, re.compile(pattern, re.I))
     for category, reason, pattern in (
+        # HEPHAESTUS PATCH: finance questions and money entries (src/finance/routing.py).
+        # First, so an amount such as "add £5 coffee today" is not read as a dated calendar event.
+        *(("finance", reason, pattern.pattern) for reason, pattern in FINANCE_INTENT_PATTERNS),
+
         # Calendar/event creation. Covers "Can you add an entry to my
         # calendar?", imperatives like "add lunch to my calendar", and
         # follow-ups such as "you should be able to create that event now".

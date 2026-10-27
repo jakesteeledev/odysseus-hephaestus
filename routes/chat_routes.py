@@ -3460,6 +3460,7 @@ def setup_chat_routes(
                 "send_email", "reply_to_email",
                 "manage_notes", "manage_calendar", "manage_tasks",
                 "api_call",
+                "query_finances", "add_transaction", "add_transfer",  # HEPHAESTUS PATCH
             })
             _web_workspace_output = bool(
                 workspace
@@ -4640,6 +4641,8 @@ def setup_chat_routes(
                         _typed_forced_tools = {
                             "calendar": {"manage_calendar"},
                             "notes": {"manage_notes", "manage_tasks"},
+                            # HEPHAESTUS PATCH: finance tracker tools.
+                            "finance": {"query_finances", "add_transaction", "add_transfer"},
                         }.get(_tool_intent.category, set())
                         if _typed_forced_tools:
                             if _forced_tools is None:
