@@ -78,5 +78,14 @@ export function createFinanceApi({ request }) {
     addRepayment: (liabilityId, body) => call('POST', `/liabilities/${encodeURIComponent(liabilityId)}/repayments`, body),
     deleteRepayment: (id) => call('DELETE', `/repayments/${encodeURIComponent(id)}`),
     linkPayment: (transactionId, liabilityId) => call('PUT', `/transactions/${encodeURIComponent(transactionId)}/payment`, { liability_id: liabilityId || null }),
+    // v2 stage 3: recurring items.
+    upcoming: (days = 30) => call('GET', `/upcoming${qs({ days })}`),
+    recurring: (includeArchived = false) => call('GET', `/recurring${qs({ include_archived: includeArchived || undefined })}`),
+    recurringSuggestions: () => call('GET', '/recurring/suggestions'),
+    createRecurring: (body) => call('POST', '/recurring', body),
+    updateRecurring: (id, body) => call('PATCH', `/recurring/${encodeURIComponent(id)}`, body),
+    deleteRecurring: (id) => call('DELETE', `/recurring/${encodeURIComponent(id)}`),
+    occurrence: (id, action, body) => call('POST', `/recurring/${encodeURIComponent(id)}/${action}`, body),
+    makeRecurring: (transactionId, body) => call('POST', `/transactions/${encodeURIComponent(transactionId)}/make-recurring`, body),
   };
 }

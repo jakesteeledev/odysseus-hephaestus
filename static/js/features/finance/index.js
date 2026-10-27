@@ -9,6 +9,7 @@ import { createLoanSection } from './ui/loanSection.js';
 import { createOverviewView } from './ui/overviewView.js';
 import { createMonthNav, createSummaryView, createTransactionsView } from './ui/transactionsView.js';
 import { createImportView } from './ui/importView.js';
+import { createUpcomingView } from './ui/upcomingView.js';
 import { createSettingsView } from './ui/settingsView.js';
 import { createPanel } from './ui/panel.js';
 import uiModule from '/static/js/ui.js?v=20260916largetoolscroll1';
@@ -38,6 +39,7 @@ const views = {
   }),
   transactions: createTransactionsView({ app, entryForm, monthNav }),
   summary: createSummaryView({ app, monthNav }),
+  upcoming: createUpcomingView({ app, ui, now }),
   add: (container, afterSave) => entryForm.render(container, { onDone: afterSave }),
   import: createImportView({ app, ui }),
   settings: createSettingsView({ app, ui, now }),

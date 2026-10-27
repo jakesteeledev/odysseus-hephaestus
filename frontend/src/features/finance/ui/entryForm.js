@@ -103,6 +103,14 @@ export function createEntryForm({ app, ui, now }) {
           <label class="task-form-label" for="fin-notes">Notes</label>
           <textarea id="fin-notes" class="task-form-input task-form-textarea" name="notes" rows="2" maxlength="2000">${esc(existing?.notes || '')}</textarea>
         </details>
+        ${existing && !isTransfer ? `
+        <div class="fin-make-recurring">
+          <select class="task-form-input" data-recurring-frequency aria-label="How often">
+            <option value="weekly">Weekly</option><option value="four_weekly">Every 4 weeks</option>
+            <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option>
+          </select>
+          <button type="button" class="task-btn" data-action="make-recurring" title="Track this as a regular payment or income">Make recurring</button>
+        </div>` : ''}
         <div class="fin-form-error" role="alert" hidden></div>
         <div class="task-form-actions">
           ${existing ? '<button type="button" class="task-btn task-btn-danger" data-action="delete">Delete</button><span style="flex:1"></span>' : ''}
@@ -211,6 +219,15 @@ export function createEntryForm({ app, ui, now }) {
     });
 
     form.querySelector('[data-action="cancel"]')?.addEventListener('click', () => onCancel && onCancel());
+    form.querySelector('[data-action="make-recurring"]')?.addEventListener('click', async () => {
+      try {
+        await app.makeRecurring(existing.id, { frequency: form.querySelector('[data-recurring-frequency]').value });
+        ui.showToast('Added to Upcoming');
+        onDone();
+      } catch (err) {
+        showError(err.message || 'Could not make it recurring');
+      }
+    });
     form.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
       const what = isTransfer ? 'this transfer (both accounts)' : 'this transaction';
       const ok = await ui.styledConfirm(`Delete ${what}? This cannot be undone.`, { title: 'Delete', confirmText: 'Delete', danger: true });

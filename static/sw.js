@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v659-notes-reference-hephaestus-finance3';  // HEPHAESTUS PATCH: bumped for finance
+const CACHE_NAME = 'odysseus-v659-notes-reference-hephaestus-finance4';  // HEPHAESTUS PATCH: bumped for finance
 
 // KaTeX resolves these from its own stylesheet, so caching the CSS without them
 // gives offline math fallback glyphs instead of proper typesetting.
@@ -212,6 +212,7 @@ const PANEL_PRECACHE = [
   '/static/js/features/finance/ui/itemView.js',
   '/static/js/features/finance/ui/overviewView.js',
   '/static/js/features/finance/ui/loanSection.js',
+  '/static/js/features/finance/ui/upcomingView.js',
   '/static/js/features/finance/index.js',
   // Image editor — galleryEditor.js and its js/editor/ graph.
   '/static/js/galleryEditor.js?v=20260909movepicklayer1',

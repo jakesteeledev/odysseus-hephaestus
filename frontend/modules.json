@@ -276,6 +276,10 @@
       "deployment": "js/features/finance/ui/loanSection.js"
     },
     {
+      "source": "features/finance/ui/upcomingView.js",
+      "deployment": "js/features/finance/ui/upcomingView.js"
+    },
+    {
       "source": "features/finance/index.js",
       "deployment": "js/features/finance/index.js",
       "legacyImports": [
