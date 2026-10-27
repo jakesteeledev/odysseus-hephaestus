@@ -36,6 +36,7 @@ CALENDAR_WRITE_SCOPES = {"calendar:write"}
 DOCS_READ_SCOPES = {"documents:read", "documents:write"}
 DOCS_WRITE_SCOPES = {"documents:write"}
 CHAT_READ_SCOPES = {"chat"}
+FINANCE_READ_SCOPES = {"finance:read"}  # HEPHAESTUS PATCH
 WRITE_ACTIONS = {"add", "create", "new", "save", "remind", "update", "delete", "toggle_item", "remove", "remove_item"}
 
 
@@ -226,6 +227,13 @@ def setup_codex_routes(
                     "read": scoped(CHAT_READ_SCOPES),
                     "actions": ["read"],
                     "available": chat_history_endpoint is not None,
+                },
+                # HEPHAESTUS PATCH: read-only finance tracker.
+                "finance": {
+                    "read": scoped(FINANCE_READ_SCOPES),
+                    "write": False,
+                    "actions": ["networth", "accounts", "assets", "liabilities", "transactions", "summary",
+                                "upcoming", "budgets"],
                 },
             },
             "safety": {
@@ -460,6 +468,11 @@ def setup_codex_routes(
         if not memory_data.text:
             raise HTTPException(400, "Empty memory text")
         return await _as_owner(request, owner, memory_add_endpoint, request, memory_data)
+
+    # ── Finance (HEPHAESTUS PATCH: read only, routes/finance/codex_finance.py) ──
+    from routes.finance.codex_finance import register_codex_finance
+
+    register_codex_finance(router, lambda request: _scope_owner(request, FINANCE_READ_SCOPES))
 
     # ── Calendar ──────────────────────────────────────────────────────────
 
