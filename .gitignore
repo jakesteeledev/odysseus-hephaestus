@@ -123,3 +123,8 @@ compound.config.json
 *.error.log
 _scratch/
 /odysseus/
+
+# Odysseus-Hephaestus: machine-specific overrides and editor backups stay local
+docker-compose.override.yml
+*.bak
+*.bak[0-9]*
