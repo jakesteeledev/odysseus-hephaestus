@@ -91,7 +91,8 @@ function frame(container, points, values, { mirror = false } = {}) {
     if (i % every !== 0) return;
     const first = i === 0 || p.month.endsWith('-01');
     const label = el('text', { x: cx(i), y: HEIGHT - 8, class: 'fin-chart-axis', 'text-anchor': 'middle' }, svg);
-    label.textContent = monthShort(p.month, first);
+    // Labels a year or more apart show the year; closer ones show the month.
+    label.textContent = every >= 12 ? p.month.slice(0, 4) : monthShort(p.month, first);
   });
   return { svg, width, y, band, cx, plotTop: PAD.top, plotBottom: PAD.top + plotH, zero: y(0) };
 }
@@ -218,6 +219,59 @@ export function membersChart(container, points, members) {
   attachTooltip(container, f, points.length, (i) => series.map((s) => (
     { label: s.member.display_name, value: s.values[i], key: 'line', cls: s.cls })),
   (i) => `${monthShort(points[i].month, true)} · as of ${points[i].as_of}`);
+}
+
+/**
+ * Net worth history continuing into the projection. History is a solid
+ * accent line; the projection is the same accent dashed. Assets (above zero)
+ * and liabilities (below zero) are lighter neutral lines. Scenarios are
+ * extra lines told apart by colour and dash pattern, and named in the
+ * tooltip. A vertical rule marks today.
+ */
+export function projectionChart(container, history, projected, scenarios = []) {
+  const points = [...history, ...projected];
+  if (!points.length) return;
+  const todayIndex = history.length - 1;
+  const at = (i, key) => points[i][key];
+  const series = scenarios.map((s, n) => ({
+    name: s.name, cls: `fin-member-line fin-color-${['blue', 'green', 'purple'][n % 3]}`, dash: `fin-chart-dash-${(n % 3) + 1}`,
+    values: [...history.map((p) => p.net_worth_pence), ...s.points.map((p) => p.net_worth_pence)],
+  }));
+  const values = points.flatMap((p) => [p.assets_pence, -p.liabilities_pence, p.net_worth_pence])
+    .concat(series.flatMap((s) => s.values));
+  const f = frame(container, points, values, { mirror: true });
+  const poly = (from, to, valueOf) => {
+    const out = [];
+    for (let i = Math.max(0, from); i <= to; i += 1) out.push(`${f.cx(i)},${f.y(valueOf(i))}`);
+    return out.join(' ');
+  };
+  const last = points.length - 1;
+  const light = el('g', { class: 'fin-c-neutral' }, f.svg);
+  el('polyline', { points: poly(0, last, (i) => at(i, 'assets_pence')), class: 'fin-chart-line fin-chart-line-light' }, light);
+  el('polyline', { points: poly(0, last, (i) => -at(i, 'liabilities_pence')), class: 'fin-chart-line fin-chart-line-light' }, light);
+  for (const s of series) {
+    const g = el('g', { class: s.cls }, f.svg);
+    el('polyline', { points: poly(todayIndex, last, (i) => s.values[i]), class: `fin-chart-line ${s.dash}` }, g);
+  }
+  const accent = el('g', { class: 'fin-c-accent' }, f.svg);
+  if (todayIndex > 0) el('polyline', { points: poly(0, todayIndex, (i) => at(i, 'net_worth_pence')), class: 'fin-chart-line' }, accent);
+  el('polyline', { points: poly(Math.max(0, todayIndex), last, (i) => at(i, 'net_worth_pence')), class: 'fin-chart-line fin-chart-dash-1' }, accent);
+  if (todayIndex >= 0) {
+    const x = f.cx(todayIndex);
+    el('line', { x1: x, x2: x, y1: f.plotTop, y2: f.plotBottom, class: 'fin-chart-today' }, f.svg);
+    const label = el('text', { x: x + 4, y: f.plotTop + 9, class: 'fin-chart-label' }, f.svg);
+    label.textContent = 'Today';
+    el('circle', { cx: x, cy: f.y(at(todayIndex, 'net_worth_pence')), r: 3.5, class: 'fin-chart-dot' }, accent);
+  }
+  el('circle', { cx: f.cx(last), cy: f.y(at(last, 'net_worth_pence')), r: 3.5, class: 'fin-chart-dot' }, accent);
+  endLabel(f, f.cx(last) + 4, f.y(at(last, 'net_worth_pence')), compactPence(at(last, 'net_worth_pence')));
+  attachTooltip(container, f, points.length, (i) => [
+    { label: i > todayIndex ? 'Net worth (projected)' : 'Net worth', value: at(i, 'net_worth_pence'), key: 'line', cls: 'fin-c-accent' },
+    ...(i > todayIndex ? series.map((s) => ({ label: s.name, value: s.values[i], key: 'line', cls: s.cls })) : []),
+    { label: 'Assets', value: at(i, 'assets_pence'), key: 'line', cls: 'fin-c-neutral' },
+    { label: 'Liabilities', value: at(i, 'liabilities_pence'), key: 'line', cls: 'fin-c-neutral' },
+    ...(at(i, 'shortfall_pence') ? [{ label: 'Shortfall (borrowing needed)', value: at(i, 'shortfall_pence'), key: 'rect', cls: 'fin-c-over' }] : []),
+  ], (i) => `${monthShort(points[i].month, true)}${i > todayIndex ? ' · projected' : i === todayIndex ? ' · today' : ''}`);
 }
 
 /** Income above and spending below zero, per month. */
