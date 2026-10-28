@@ -239,6 +239,9 @@ def create_account(db: Session, owner, *, name, account_type="current", opening_
     )
     db.add(account)
     db.flush()
+    from src.finance.members import assign_default_owner
+
+    assign_default_owner(db, owner, "account", account.id)
     return account
 
 
@@ -276,6 +279,9 @@ def delete_account(db: Session, owner, account_id) -> None:
     db.query(FinanceImportBatch).filter(
         FinanceImportBatch.owner == owner, FinanceImportBatch.account_id == account.id
     ).delete(synchronize_session=False)
+    from src.finance.members import remove_owners
+
+    remove_owners(db, owner, "account", account.id)
     db.delete(account)
     db.flush()
 

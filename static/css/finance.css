@@ -179,3 +179,10 @@
   .fin-hbar-flag { grid-column: 1 / -1; }
   .fin-stat { flex-direction: row; justify-content: space-between; align-items: center; }
 }
+
+/* v3: household members */
+.fin-avatar { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex-shrink: 0;
+  border-radius: 50%; font-size: 9px; font-weight: 600; letter-spacing: 0.02em; color: var(--fg);
+  background: color-mix(in srgb, var(--fin-color, var(--fg)) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fin-color, var(--fg)) 55%, transparent); }
+.fin-row-archived { opacity: 0.6; }

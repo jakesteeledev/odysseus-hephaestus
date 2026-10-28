@@ -9,8 +9,10 @@ runs idempotent ``_migrate_*`` helpers), so finance keeps its own small one:
   is copied to ``FINANCE_BACKUP_DIR`` with SQLite's online backup API. If the
   copy fails, nothing is migrated.
 - Every step is idempotent (``create_all`` skips existing tables; column
-  additions check ``PRAGMA table_info`` first) and only ever adds tables or
-  nullable columns, so v1 rows are never rewritten.
+  additions check ``PRAGMA table_info`` first) and only ever adds tables,
+  nullable columns or new rows, so existing rows are never rewritten.
+  Step 6 inserts a primary household member per user and makes them the
+  owner of every existing account, asset and liability.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from core.database import Base
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def _create(bind, tables) -> None:
@@ -74,7 +76,28 @@ def _step_5(bind) -> None:
     _create(bind, V5_TABLES)
 
 
-STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4, 5: _step_5}
+def _step_6(bind) -> None:
+    """Household members: one primary member per user, owning all existing items.
+
+    Only inserts rows into the two new tables; existing rows are not touched.
+    """
+    from sqlalchemy.orm import Session
+
+    from src.finance.members import ensure_household
+    from src.finance.models import V6_TABLES
+
+    _create(bind, V6_TABLES)
+    owners: set[str] = set()
+    with bind.connect() as conn:
+        for table in ("finance_accounts", "finance_assets", "finance_liabilities", "finance_categories"):
+            owners.update(row[0] for row in conn.execute(text(f"SELECT DISTINCT owner FROM {table}")) if row[0])
+    with Session(bind=bind) as db:
+        for owner in sorted(owners):
+            ensure_household(db, owner)
+        db.commit()
+
+
+STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4, 5: _step_5, 6: _step_6}
 
 
 def _current_version(bind) -> int:

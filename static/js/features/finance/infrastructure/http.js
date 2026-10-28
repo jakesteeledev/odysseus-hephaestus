@@ -93,5 +93,10 @@ export function createFinanceApi({ request }) {
     // v2 stage 5: chart data.
     history: (range) => call('GET', `/insights/history${qs({ range })}`),
     monthly: (range, categoryId) => call('GET', `/insights/monthly${qs({ range, category_id: categoryId })}`),
+    // v3: household members.
+    members: (includeArchived = false) => call('GET', `/members${qs({ include_archived: includeArchived || undefined })}`),
+    createMember: (body) => call('POST', '/members', body),
+    updateMember: (id, body) => call('PATCH', `/members/${encodeURIComponent(id)}`, body),
+    deleteMember: (id) => call('DELETE', `/members/${encodeURIComponent(id)}`),
   };
 }

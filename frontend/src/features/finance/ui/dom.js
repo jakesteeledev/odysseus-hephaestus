@@ -39,6 +39,14 @@ export function categoryDot(color) {
   return `<span class="fin-dot${name ? ` fin-color-${esc(name)}` : ''}" aria-hidden="true"></span>`;
 }
 
+/** Round initials avatar in the member's colour (theme-aware, see finance.css). */
+export function avatarHtml(member, { title = true } = {}) {
+  if (!member) return '';
+  const color = member.color ? ` fin-color-${esc(member.color)}` : '';
+  const label = title ? ` title="${esc(member.display_name || member.name)}"` : '';
+  return `<span class="fin-avatar${color}"${label} aria-hidden="true">${esc(member.initials)}</span>`;
+}
+
 export function amountHtml(pence, direction) {
   const cls = direction === 'in' ? 'fin-amount fin-amount-in' : 'fin-amount';
   return `<span class="${cls}">${esc(formatDirected(pence, direction))}</span>`;

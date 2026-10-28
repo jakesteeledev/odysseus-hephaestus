@@ -21,10 +21,11 @@ from src.finance import csv_io, imports
 from src.finance import budgets as bud
 from src.finance import insights
 from src.finance import loans
+from src.finance import members as mem
 from src.finance import recurring as rec
 from src.finance import networth as nw
 from src.finance import service as fin
-from src.finance.models import ACCOUNT_TYPES, CATEGORY_COLORS, ensure_tables
+from src.finance.models import ACCOUNT_TYPES, CATEGORY_COLORS, RELATIONSHIPS, ensure_tables
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,24 @@ class MakeRecurring(BaseModel):
     name: Optional[str] = None
 
 
+class MemberCreate(BaseModel):
+    name: str
+    relationship: str = "other"
+    date_of_birth: Optional[str] = None
+    color: Optional[str] = None
+    initials: str = ""
+
+
+class MemberUpdate(BaseModel):
+    name: Optional[str] = None
+    relationship: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    color: Optional[str] = None
+    initials: Optional[str] = None
+    archived: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
@@ -298,7 +317,35 @@ def setup_finance_routes() -> APIRouter:
             "date_formats": list(csv_io.DATE_FORMATS),
             "default_date_format": csv_io.DEFAULT_DATE_FORMAT,
             "max_import_rows": csv_io.MAX_IMPORT_ROWS,
+            "relationships": [r for r in RELATIONSHIPS if r != "me"],
         }
+
+    # Household members
+
+    @router.get("/members")
+    def list_members(request: Request, include_archived: bool = False):
+        owner = _owner(request)
+        with _session() as db:
+            return {"members": mem.list_members(db, owner, include_archived=include_archived)}
+
+    @router.post("/members")
+    def create_member(body: MemberCreate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return mem.member_to_dict(mem.create_member(db, owner, **body.model_dump()), owns=0)
+
+    @router.patch("/members/{member_id}")
+    def update_member(member_id: str, body: MemberUpdate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return mem.member_to_dict(mem.update_member(db, owner, member_id, **_changes(body)))
+
+    @router.delete("/members/{member_id}")
+    def delete_member(member_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            mem.delete_member(db, owner, member_id)
+            return {"ok": True}
 
     # Accounts
 

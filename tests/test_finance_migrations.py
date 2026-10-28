@@ -35,8 +35,12 @@ def _dump(path):
 
 
 @pytest.fixture
-def v1_database(tmp_path):
+def v1_database(tmp_path, monkeypatch):
     """A database exactly as Finance v1 left it: v1 tables, real data, no finance_meta."""
+    # v1 had no household members, so new accounts got no owner rows.
+    from src.finance import members
+
+    monkeypatch.setattr(members, "assign_default_owner", lambda *args, **kwargs: None)
     path = tmp_path / "app.db"
     engine = _engine(path)
     Base.metadata.create_all(bind=engine, tables=V1_TABLES)

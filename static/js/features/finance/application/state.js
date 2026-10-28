@@ -15,6 +15,7 @@ export function createFinanceState({ api, storage, now }) {
     networth: null,        // assets - liabilities, grouped by type
     assets: [],            // including archived, with current values
     liabilities: [],
+    members: [],           // household members, primary first, including archived
     month: { year: today.getFullYear(), month: today.getMonth() + 1 },
     filters: { accountId: '', categoryId: '', direction: '', q: '' },
     transactions: [],
@@ -38,6 +39,7 @@ export function createFinanceState({ api, storage, now }) {
   const itemById = (kind, id) => (kind === 'asset' ? state.assets : state.liabilities).find((i) => i.id === id) || null;
   const collectionOf = (kind) => (kind === 'asset' ? 'assets' : 'liabilities');
   const categoryById = (id) => state.categories.find((c) => c.id === id) || null;
+  const memberById = (id) => state.members.find((m) => m.id === id) || null;
 
   /** Default account for new entries: last used if still active, else the first. */
   function defaultAccountId() {
@@ -48,9 +50,11 @@ export function createFinanceState({ api, storage, now }) {
   }
 
   async function loadBase() {
-    const [accounts, categories, networth, assets, liabilities] = await Promise.all([
+    const [accounts, categories, networth, assets, liabilities, members] = await Promise.all([
       api.accounts(true), api.categories(), api.networth(), api.items('assets', true), api.items('liabilities', true),
+      api.members(true),
     ]);
+    state.members = members.members;
     state.accounts = accounts.accounts;
     state.totalPence = accounts.total_pence;
     state.categories = categories.categories;
@@ -137,6 +141,7 @@ export function createFinanceState({ api, storage, now }) {
     activeAccounts,
     accountById,
     categoryById,
+    memberById,
     defaultAccountId,
     refresh,
     refreshMonth,
@@ -195,6 +200,9 @@ export function createFinanceState({ api, storage, now }) {
     updateCategory: (id, body) => mutate(() => api.updateCategory(id, body)),
     deleteCategory: (id) => mutate(() => api.deleteCategory(id)),
     categoryUsage: (id) => api.categoryUsage(id),
+    createMember: (body) => mutate(() => api.createMember(body)),
+    updateMember: (id, body) => mutate(() => api.updateMember(id, body)),
+    deleteMember: (id) => mutate(() => api.deleteMember(id)),
     commitImport: (body) => mutate(() => api.commitImport(body)),
     undoImport: (id) => mutate(() => api.undoImport(id)),
     // Import helpers, rules and saved mappings change no balances, so they

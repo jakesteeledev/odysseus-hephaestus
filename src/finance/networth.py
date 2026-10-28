@@ -170,6 +170,9 @@ def create_item(db: Session, owner, kind: str, *, value=None, value_date=None, *
         item.linked_asset_id = _check_link(db, owner, item.liability_type, data.get("linked_asset_id"))
     db.add(item)
     db.flush()
+    from src.finance.members import assign_default_owner
+
+    assign_default_owner(db, owner, kind, item.id)
     if value not in (None, ""):
         set_valuation(db, owner, kind, item.id, value=value, on=value_date)
     return item
@@ -206,6 +209,9 @@ def delete_item(db: Session, owner, kind: str, item_id) -> None:
             FinanceLiability.owner == owner, FinanceLiability.linked_asset_id == item.id).first() is not None
     if has_history:
         raise FinanceConflict(f"this {kind} has history or links; archive it instead")
+    from src.finance.members import remove_owners
+
+    remove_owners(db, owner, kind, item.id)
     db.delete(item)
     db.flush()
 

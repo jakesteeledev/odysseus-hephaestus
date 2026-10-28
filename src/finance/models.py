@@ -342,6 +342,54 @@ class FinanceBudget(TimestampMixin, Base):
     )
 
 
+# ── v3: household members and ownership ───────────────────────────────
+
+RELATIONSHIPS = ("me", "partner", "child", "other")
+OWNED_KINDS = ("account", "asset", "liability")
+
+
+class FinanceMember(TimestampMixin, Base):
+    """A person in the household. Tracked profiles only: they don't log in.
+
+    ``owner`` is still the Odysseus user whose data this is. ``linked_user``
+    is reserved for linking a member to their own login later (unused).
+    """
+
+    __tablename__ = "finance_members"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    relationship = Column(String, nullable=False, default="other")
+    date_of_birth = Column(Date, nullable=True)
+    color = Column(String, nullable=False, default="")  # a CATEGORY_COLORS name
+    initials = Column(String, nullable=False, default="")  # blank = from the name
+    is_primary = Column(Boolean, nullable=False, default=False)
+    archived = Column(Boolean, nullable=False, default=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    linked_user = Column(String, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("relationship IN ('me', 'partner', 'child', 'other')",
+                        name="ck_finance_member_relationship"),
+    )
+
+
+class FinanceItemOwner(Base):
+    """One owner of an account, asset or liability. Joint items have several rows."""
+
+    __tablename__ = "finance_item_owners"
+
+    owner = Column(String, nullable=False, index=True)
+    item_kind = Column(String, primary_key=True)
+    item_id = Column(String, primary_key=True)
+    member_id = Column(String, ForeignKey("finance_members.id"), primary_key=True, index=True)
+
+    __table_args__ = (
+        CheckConstraint("item_kind IN ('account', 'asset', 'liability')", name="ck_finance_item_owner_kind"),
+    )
+
+
 class FinanceMeta(Base):
     """Finance schema bookkeeping (key/value), e.g. schema_version."""
 
@@ -374,7 +422,9 @@ V4_TABLES = [
     FinanceRecurringEvent.__table__,
 ]
 V5_TABLES = [FinanceBudget.__table__]
-FINANCE_TABLES = V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + [FinanceMeta.__table__]
+V6_TABLES = [FinanceMember.__table__, FinanceItemOwner.__table__]
+FINANCE_TABLES = (V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + V6_TABLES
+                  + [FinanceMeta.__table__])
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()
 _ensure_lock = threading.Lock()

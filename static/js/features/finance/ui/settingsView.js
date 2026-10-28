@@ -1,14 +1,19 @@
-/** Finance settings: categories, categorisation rules, saved bank mappings and CSV export. */
+/** Finance settings: household members, categories, categorisation rules, saved bank mappings and CSV export. */
 
 import { isoDay, monthBounds } from '../domain/money.js';
-import { ICONS, categoryDot, emptyHtml, esc, optionsHtml } from './dom.js';
+import { ICONS, avatarHtml, categoryDot, emptyHtml, esc, optionsHtml } from './dom.js';
 
 const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+const MEMBER_COLORS = COLORS.filter(Boolean);
+// New members get the next colour in this order (matches the server's default).
+const DEFAULT_MEMBER_COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'yellow'];
+const RELATIONSHIPS = [['partner', 'Partner'], ['child', 'Child'], ['other', 'Other']];
 
 export function createSettingsView({ app, ui, now }) {
   let rules = [];
   let mappings = [];
   let editingCategory = null; // id, 'new' or null
+  let editingMember = null; // id, 'new' or null
   let errorText = '';
 
   async function load() {
@@ -20,10 +25,72 @@ export function createSettingsView({ app, ui, now }) {
     }
   }
 
-  function colorPicker(selected) {
-    return `<div class="fin-color-picker" role="radiogroup" aria-label="Colour">${COLORS.map((c) => `
+  function colorPicker(selected, colors = COLORS) {
+    return `<div class="fin-color-picker" role="radiogroup" aria-label="Colour">${colors.map((c) => `
       <button type="button" class="fin-color-swatch${c === selected ? ' active' : ''}" data-color="${c}" role="radio"
         aria-checked="${c === selected}" title="${c || 'No colour'}">${categoryDot(c)}</button>`).join('')}</div>`;
+  }
+
+  function memberForm(m) {
+    const relationship = m?.relationship || 'partner';
+    const relationshipField = m?.is_primary
+      ? '<div class="fin-row-sub">Me (the primary member, named after your account)</div>'
+      : `<div class="task-form-toggle" role="radiogroup" aria-label="Relationship">${RELATIONSHIPS.map(([value, label]) => `
+          <button type="button" class="task-toggle-btn${relationship === value ? ' active' : ''}" data-relationship="${value}">${label}</button>`).join('')}</div>`;
+    return `
+      <form class="task-form fin-inline-form" data-member-form novalidate>
+        <div class="fin-form-row">
+          <div class="fin-form-col">
+            <label class="task-form-label" for="fin-member-name">Name</label>
+            <input id="fin-member-name" class="task-form-input" name="name" maxlength="80" value="${esc(m?.name || '')}" autocomplete="off">
+          </div>
+          <div class="fin-form-col">
+            <label class="task-form-label">Relationship</label>
+            ${relationshipField}
+          </div>
+        </div>
+        <div class="fin-form-row">
+          <div class="fin-form-col">
+            <label class="task-form-label" for="fin-member-dob">Date of birth <span class="fin-row-sub">(optional, needed for children's accounts)</span></label>
+            <input id="fin-member-dob" class="task-form-input" type="date" name="date_of_birth" value="${esc(m?.date_of_birth || '')}">
+          </div>
+          <div class="fin-form-col">
+            <label class="task-form-label" for="fin-member-initials">Initials <span class="fin-row-sub">(optional)</span></label>
+            <input id="fin-member-initials" class="task-form-input" name="initials" maxlength="3" value="${esc(m?.custom_initials || '')}" placeholder="${esc(m?.initials || '')}" autocomplete="off">
+          </div>
+        </div>
+        <label class="task-form-label">Colour</label>
+        ${colorPicker(m?.color || DEFAULT_MEMBER_COLORS[app.state.members.length % DEFAULT_MEMBER_COLORS.length], MEMBER_COLORS)}
+        <div class="fin-form-error" role="alert" hidden></div>
+        <div class="task-form-actions">
+          ${m && !m.is_primary && !m.owns_count ? '<button type="button" class="task-btn task-btn-danger" data-action="delete-member">Delete</button>' : ''}
+          ${m && !m.is_primary ? `<button type="button" class="task-btn" data-action="archive-member">${m.archived ? 'Restore' : 'Archive'}</button>` : ''}
+          <span style="flex:1"></span>
+          <button type="button" class="task-btn" data-action="cancel-member">Cancel</button>
+          <button type="submit" class="task-btn task-btn-primary">${m ? 'Save' : 'Add member'}</button>
+        </div>
+      </form>`;
+  }
+
+  function membersHtml() {
+    const rows = app.state.members.map((m) => {
+      if (editingMember === m.id) return `<div class="memory-item fin-edit-card">${memberForm(m)}</div>`;
+      const details = [m.relationship_label];
+      if (m.age !== null && m.age !== undefined) details.push(`age ${m.age}`);
+      if (m.owns_count) details.push(`owns ${m.owns_count} item${m.owns_count === 1 ? '' : 's'}`);
+      return `<div class="memory-item fin-row${m.archived ? ' fin-row-archived' : ''}" data-member-id="${esc(m.id)}" role="button" tabindex="0">
+          ${avatarHtml(m, { title: false })}
+          <div class="fin-row-main"><span class="memory-item-title">${esc(m.display_name)}</span>
+          <span class="fin-row-sub">${esc(details.join(' · '))}</span></div>
+          ${m.archived ? '<span class="fin-badge">Archived</span>' : ''}
+        </div>`;
+    }).join('');
+    return `
+      <div class="fin-card-head"><h3 class="fin-section-title">Household</h3><span style="flex:1"></span>
+        <button type="button" class="memory-toolbar-btn" data-action="new-member">+ Add member</button></div>
+      <p class="memory-desc">People in your household. Only you log in; members are used to show who owns each account, asset and debt.</p>
+      ${editingMember === 'new' ? `<div class="memory-item fin-edit-card">${memberForm(null)}</div>` : ''}
+      <div class="memory-list fin-list">${rows}</div>`;
   }
 
   function categoryForm(cat) {
@@ -128,6 +195,7 @@ export function createSettingsView({ app, ui, now }) {
     container.innerHTML = `
       <div class="admin-card fin-card">
         ${errorText ? `<div class="fin-form-error" role="alert">${esc(errorText)}</div>` : ''}
+        ${membersHtml()}
         ${categoriesHtml()}
         ${rulesHtml()}
         ${mappingsHtml()}
@@ -138,6 +206,14 @@ export function createSettingsView({ app, ui, now }) {
 
   function wire(container) {
     const rerender = () => render(container);
+    container.querySelector('[data-action="new-member"]').addEventListener('click', () => { editingMember = 'new'; rerender(); });
+    container.querySelectorAll('[data-member-id]').forEach((row) => {
+      const open = () => { editingMember = row.dataset.memberId; rerender(); };
+      row.addEventListener('click', open);
+      row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
+    const memberFormEl = container.querySelector('[data-member-form]');
+    if (memberFormEl) wireMemberForm(container, memberFormEl);
     container.querySelector('[data-action="new-category"]').addEventListener('click', () => { editingCategory = 'new'; rerender(); });
     container.querySelectorAll('[data-category-id]').forEach((row) => {
       const open = () => { editingCategory = row.dataset.categoryId; rerender(); };
@@ -190,6 +266,67 @@ export function createSettingsView({ app, ui, now }) {
       document.body.appendChild(link);
       link.click();
       link.remove();
+    });
+  }
+
+  function wireMemberForm(container, form) {
+    const member = editingMember === 'new' ? null : app.memberById(editingMember);
+    let relationship = member?.relationship || 'partner';
+    let color = form.querySelector('[data-color].active')?.dataset.color || '';
+    const errorBox = form.querySelector('.fin-form-error');
+    const fail = (msg) => { errorBox.textContent = msg; errorBox.hidden = !msg; };
+    const close = () => { editingMember = null; render(container); };
+    form.querySelectorAll('[data-relationship]').forEach((b) => b.addEventListener('click', () => {
+      relationship = b.dataset.relationship;
+      form.querySelectorAll('[data-relationship]').forEach((x) => x.classList.toggle('active', x === b));
+    }));
+    form.querySelectorAll('[data-color]').forEach((b) => b.addEventListener('click', () => {
+      color = b.dataset.color;
+      form.querySelectorAll('[data-color]').forEach((x) => {
+        x.classList.toggle('active', x === b);
+        x.setAttribute('aria-checked', String(x === b));
+      });
+    }));
+    form.querySelector('[data-action="cancel-member"]').addEventListener('click', close);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        name: form.name.value.trim(),
+        date_of_birth: form.date_of_birth.value || null,
+        initials: form.initials.value.trim(),
+        color,
+      };
+      if (!body.name) { fail('Give the member a name'); return; }
+      if (!member?.is_primary) body.relationship = relationship;
+      try {
+        if (member) await app.updateMember(member.id, body);
+        else await app.createMember(body);
+        ui.showToast(member ? 'Member saved' : 'Member added');
+        close();
+      } catch (err) { fail(err.message); }
+    });
+    form.querySelector('[data-action="archive-member"]')?.addEventListener('click', async () => {
+      if (!member.archived) {
+        const ok = await ui.styledConfirm(
+          `Archive ${member.name}? Anything they own stays theirs and still counts in your totals. They just won't be offered for new items.`,
+          { title: 'Archive member', confirmText: 'Archive' });
+        if (!ok) return;
+      }
+      try {
+        await app.updateMember(member.id, { archived: !member.archived });
+        ui.showToast(member.archived ? 'Member restored' : 'Member archived');
+        close();
+      } catch (err) { fail(err.message); }
+    });
+    form.querySelector('[data-action="delete-member"]')?.addEventListener('click', async () => {
+      const ok = await ui.styledConfirm(`Delete ${member.name}? This can't be undone.`,
+        { title: 'Delete member', confirmText: 'Delete', danger: true });
+      if (!ok) return;
+      try {
+        await app.deleteMember(member.id);
+        ui.showToast('Member deleted');
+        close();
+      } catch (err) { fail(err.message); }
     });
   }
 
