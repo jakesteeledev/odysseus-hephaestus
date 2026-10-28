@@ -28,6 +28,9 @@ from src.tools.finance import (  # noqa: F401
     do_set_budget,
 )
 from src.tools.finance_household import do_manage_members  # noqa: F401  HEPHAESTUS PATCH: finance v3
+from src.tools.finance_projection import (  # noqa: F401  HEPHAESTUS PATCH: projections and salary
+    do_manage_projection_scenario, do_project_finances, do_query_salary, do_update_salary,
+)
 from src.tools.calendar import do_manage_calendar  # noqa: F401
 from src.tools.image import do_edit_image  # noqa: F401
 from src.tools.research import do_manage_research, do_trigger_research  # noqa: F401

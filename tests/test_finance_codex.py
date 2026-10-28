@@ -110,3 +110,18 @@ def test_household_reads(client):
     assert client.get("/api/codex/finance/children", headers=READ).json()["children"] == []
     assert client.get("/api/codex/finance/members", headers={"x-scopes": ""}).status_code == 403
     assert client.post("/api/codex/finance/members", headers=READ, json={}).status_code == 405
+
+
+def test_projection_and_salary_reads(client):
+    """Projections and salary are readable with finance:read, and never writable."""
+    data = client.get("/api/codex/finance/projection?years=2", headers=READ).json()
+    assert data["years"] == 2 and len(data["base"]["years"]) == 2
+    assert data["base"]["end"]["net_worth_pence"] == data["base"]["years"][-1]["net_worth_pence"]
+    salary = client.get("/api/codex/finance/salary", headers=READ).json()
+    assert salary["jobs"] == [] and salary["tax_year"]
+    assert client.get("/api/codex/finance/projection?scenario=nope", headers=READ).status_code == 404
+    assert client.get("/api/codex/finance/salary", headers={"x-scopes": ""}).status_code == 403
+    assert client.post("/api/codex/finance/salary", headers=READ, json={}).status_code == 405
+    # Bob can't see Alice's projection: his only has his own account.
+    bob = client.get("/api/codex/finance/projection?years=1", headers={**READ, "x-owner": "bob"}).json()
+    assert bob["base"]["start"]["cash_pence"] == 9900

@@ -66,6 +66,9 @@ from src.tools.finance import (  # noqa: F401
     do_set_budget,
 )
 from src.tools.finance_household import do_manage_members  # noqa: F401  HEPHAESTUS PATCH: finance v3
+from src.tools.finance_projection import (  # noqa: F401  HEPHAESTUS PATCH: projections and salary
+    do_manage_projection_scenario, do_project_finances, do_query_salary, do_update_salary,
+)
 # Calendar domain extracted to src/tools/calendar.py (slice 1, #4082/#4071).
 from src.tools.calendar import do_manage_calendar  # noqa: F401
 # Image domain extracted to src/tools/image.py (slice 1, #4082/#4071).

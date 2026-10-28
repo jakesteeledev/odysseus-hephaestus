@@ -22,7 +22,7 @@ import time
 import logging
 import hashlib
 # HEPHAESTUS PATCH: finance tracker vocabulary.
-from src.finance.routing import FINANCE_KEYWORDS, FINANCE_TOOLS
+from src.finance.routing import FINANCE_KEYWORDS, FINANCE_TOOLS, PROJECTION_KEYWORDS, SALARY_KEYWORDS
 from src.web_recovery import WebRecoveryBudget
 from itertools import count
 from datetime import date, datetime, timedelta
@@ -835,6 +835,10 @@ _QWEN38_TOOL_ROUTER_PROMPT = (
     "manage_recurring: list/add/confirm/skip regular bills, subscriptions and income. "
     "set_budget: set or remove a monthly budget for a spending category. "
     "manage_members: household members (partner, children) and who owns each account or asset. "
+    "project_finances: future net worth, balances, debt-free dates and what-ifs worked out by the engine "
+    "(quote its figures, never recalculate). manage_projection_scenario: save/list/delete named what-ifs. "
+    "query_salary: take-home, payslip breakdown, tax code, marginal rate, salary what-ifs. "
+    "update_salary: record a pay rise, new salary, tax code or pension change. "
     "manage_settings: app settings. manage_endpoints: configured API endpoints; list_models: available models. "
     "manage_mcp: MCP servers. manage_skills: skills. manage_webhooks: webhooks. manage_bg_jobs: running/background jobs. "
     "search_chats: past chats. web_search: public web lookup, URLs, links; web_fetch: fetch a concrete URL/domain. "
@@ -882,6 +886,9 @@ _QWEN38_ROUTER_KEYWORD_TOOLS = (
     (("contact", "contacts", "address book", "phone number"), {"manage_contact"}),
     # HEPHAESTUS PATCH: finance tracker. Listed before email so "subscriptions"
     # spending questions also offer the finance tools.
+    # Projections and salary first, so they reach their own tools (and "payslip" never goes to email).
+    (PROJECTION_KEYWORDS, {"project_finances", "manage_projection_scenario", "query_finances"}),
+    (SALARY_KEYWORDS, {"query_salary", "update_salary"}),
     (FINANCE_KEYWORDS, set(FINANCE_TOOLS)),
     (("email", "emails", "mail", "inbox", "gmail", "message", "messages", "sender", "senders", "block sender", "attachment", "attachments", "attached", "pdf", "receipt", "receipts", "invoice", "invoices", "zip receipts", "newsletter", "unsubscribe", "unsubscribes", "subscription", "spam", "phishing", "junk", "blocked sender", "blocked senders", "unblock", "favorite", "unfavorite", "unarchive", "unread", "done", "undone", "writing style", "reply style"), {"list_email_accounts", "mcp__email__list_emails", "mcp__email__read_email", "mcp__email__search_emails", "mcp__email__download_attachment", "mcp__email__draft_email", "mcp__email__draft_email_reply", "mcp__email__scan_email_unsubscribes", "mcp__email__unsubscribe_email", "mcp__email__scan_spam", "mcp__email__block_sender", "mcp__email__manage_email_state", "manage_settings"}),
     (("calendar", "event", "schedule", "appointment", "meeting"), {"manage_calendar", "calendar_list_events", "calendar_get_event", "calendar_create_event", "calendar_update_event", "calendar_delete_event"}),

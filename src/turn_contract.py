@@ -690,9 +690,14 @@ def _has_cookbook_server_reference(text: str) -> bool:
     )
 
 
+# HEPHAESTUS PATCH: real words that must not be "corrected" into a family
+# noun ("sell the car" is a money question, not a typo of "shell").
+_FUZZY_REAL_WORDS = frozenset({"sell", "sells"})
+
+
 def _fuzzy_family(text: str) -> str | None:
     """Resolve one unambiguous misspelled family noun, otherwise abstain."""
-    tokens = re.findall(r"[a-z]+", text.lower())
+    tokens = [t for t in re.findall(r"[a-z]+", text.lower()) if t not in _FUZZY_REAL_WORDS]
     candidates = [(token, False) for token in tokens]
     candidates.extend((tokens[i] + tokens[i + 1], True) for i in range(len(tokens) - 1))
     hits: list[tuple[int, str]] = []
