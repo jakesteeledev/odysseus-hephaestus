@@ -260,6 +260,10 @@
       "deployment": "js/features/finance/ui/ownerChips.js"
     },
     {
+      "source": "features/finance/ui/childrenSection.js",
+      "deployment": "js/features/finance/ui/childrenSection.js"
+    },
+    {
       "source": "features/finance/ui/panel.js",
       "deployment": "js/features/finance/ui/panel.js"
     },

@@ -30,7 +30,8 @@ from sqlalchemy import (
 
 from core.database import Base, TimestampMixin
 
-ACCOUNT_TYPES = ("current", "savings", "credit_card", "cash")
+# v3 adds accounts held for children (a child's savings or current account).
+ACCOUNT_TYPES = ("current", "savings", "credit_card", "cash", "child_savings", "child_current")
 CATEGORY_KINDS = ("income", "expense")
 DIRECTIONS = ("in", "out")
 # Named colours shared with the Notes and Calendar colour pickers; the
@@ -51,7 +52,7 @@ class FinanceAccount(TimestampMixin, Base):
 
     __table_args__ = (
         CheckConstraint(
-            "account_type IN ('current', 'savings', 'credit_card', 'cash')",
+            "account_type IN ('current', 'savings', 'credit_card', 'cash', 'child_savings', 'child_current')",
             name="ck_finance_account_type",
         ),
     )
@@ -290,6 +291,8 @@ class FinanceRecurring(TimestampMixin, Base):
     match_text = Column(String, nullable=False, default="")  # words expected in the bank description
     liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=True)  # loan payment
     asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=True)  # regular contribution
+    # Set for a regular transfer (e.g. pocket money): money moves from account_id to here.
+    to_account_id = Column(String, ForeignKey("finance_accounts.id"), nullable=True)
     archived = Column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
@@ -390,6 +393,16 @@ class FinanceItemOwner(Base):
     )
 
 
+class FinanceSetting(Base):
+    """Per-user finance settings (key/value), e.g. the Junior ISA allowance."""
+
+    __tablename__ = "finance_settings"
+
+    owner = Column(String, primary_key=True)
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
+
 class FinanceMeta(Base):
     """Finance schema bookkeeping (key/value), e.g. schema_version."""
 
@@ -423,7 +436,8 @@ V4_TABLES = [
 ]
 V5_TABLES = [FinanceBudget.__table__]
 V6_TABLES = [FinanceMember.__table__, FinanceItemOwner.__table__]
-FINANCE_TABLES = (V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + V6_TABLES
+V7_TABLES = [FinanceSetting.__table__]
+FINANCE_TABLES = (V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + V6_TABLES + V7_TABLES
                   + [FinanceMeta.__table__])
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()

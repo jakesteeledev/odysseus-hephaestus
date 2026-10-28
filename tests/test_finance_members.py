@@ -224,8 +224,8 @@ def test_upgrade_to_v6_assigns_everything_to_a_primary_member(tmp_path, monkeypa
     assert migrations._current_version(engine) == 5
 
     backups = tmp_path / "backups"
-    assert migrations.migrate(engine, backup_dir=str(backups)) == 6
-    assert migrations.migrate(engine, backup_dir=str(backups)) == 6  # runs once
+    assert migrations.migrate(engine, backup_dir=str(backups)) == migrations.SCHEMA_VERSION
+    assert migrations.migrate(engine, backup_dir=str(backups)) == migrations.SCHEMA_VERSION  # runs once
     assert [p.name.split("-to-")[0] for p in backups.iterdir()] == ["app-before-finance-v5"]
     assert _dump_all(path, old_tables) == before  # not a single existing row changed
 

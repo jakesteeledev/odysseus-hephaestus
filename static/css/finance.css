@@ -33,7 +33,7 @@
 
 .fin-form-row { display: flex; gap: 8px; align-items: flex-end; }
 .fin-form-col { flex: 1; min-width: 0; }
-.fin-form-col[hidden] { display: none; }
+.fin-form-col[hidden], .fin-form-row[hidden] { display: none; }
 .fin-check-col { display: flex; align-items: center; min-height: 30px; }
 .fin-check-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; }
 .fin-amount-input { font-size: 16px; font-variant-numeric: tabular-nums; }
@@ -210,3 +210,11 @@
 .fin-chart-dash-3 { stroke-dasharray: 8 3 2 3; }
 .fin-moved { font-size: 11px; opacity: 0.8; }
 .fin-legend .fin-avatar { width: 16px; height: 16px; font-size: 7px; }
+/* v3: Children section */
+.fin-child { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid var(--border); }
+.fin-child:first-of-type { border-top: none; }
+.fin-child-item { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-left: 30px; font-size: 11px; min-width: 0; }
+.fin-child-item > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.fin-child-allowance, .fin-child-transfers { padding-left: 30px; display: flex; flex-direction: column; gap: 2px; }
+.fin-child-transfers .fin-child-item { padding-left: 0; }
+.fin-child .fin-link-btn { margin-left: 30px; }

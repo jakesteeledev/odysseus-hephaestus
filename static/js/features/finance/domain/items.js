@@ -2,8 +2,8 @@
 
 export const ASSET_TYPES = [
   { value: 'property', label: 'Property', subtypes: ['home', 'buy to let', 'land'] },
-  { value: 'investment', label: 'Investment', subtypes: ['isa', 'lisa', 'general investment account', 'shares', 'funds', 'crypto'] },
-  { value: 'pension', label: 'Pension', subtypes: ['workplace', 'private', 'sipp'] },
+  { value: 'investment', label: 'Investment', subtypes: ['isa', 'lisa', 'junior isa', 'general investment account', 'shares', 'funds', 'crypto'] },
+  { value: 'pension', label: 'Pension', subtypes: ['workplace', 'private', 'sipp', 'junior sipp'] },
   { value: 'vehicle', label: 'Vehicle', subtypes: ['car', 'motorbike', 'van'] },
   { value: 'other', label: 'Other', subtypes: ['valuables', 'money owed to me'] },
 ];

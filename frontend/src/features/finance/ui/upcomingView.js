@@ -34,6 +34,8 @@ export function createUpcomingView({ app, ui, now }) {
   }
 
   const accountName = (id) => app.accountById(id)?.name || 'account';
+  /** "Current" or "Current → Alfie saver" for a regular transfer. */
+  const route = (row) => (row.to_account_id ? `${accountName(row.account_id)} → ${accountName(row.to_account_id)}` : accountName(row.account_id));
 
   function occurrenceHtml(row) {
     const resolved = row.status === 'confirmed' || row.status === 'skipped';
@@ -46,7 +48,7 @@ export function createUpcomingView({ app, ui, now }) {
       <div class="memory-item fin-row fin-static-row fin-occurrence${resolved ? ' fin-row-skipped' : ''}">
         <div class="fin-row-main">
           <span class="memory-item-title">${esc(row.name)}</span>
-          <span class="fin-row-sub">${esc(dayLabel(row.due_date))} · ${esc(accountName(row.account_id))} · ${esc(row.frequency_label.toLowerCase())}${esc(shareNote(app, row.amount_pence, row.share_pence ?? row.amount_pence, formatPence))}</span>
+          <span class="fin-row-sub">${esc(dayLabel(row.due_date))} · ${esc(route(row))} · ${esc(row.frequency_label.toLowerCase())}${esc(shareNote(app, row.amount_pence, row.share_pence ?? row.amount_pence, formatPence))}</span>
           <div class="fin-occurrence-actions">
             ${resolved
               ? `<button type="button" class="memory-toolbar-btn" data-occ-action="undo" data-id="${esc(row.recurring_id)}" data-due="${esc(row.due_date)}">Undo</button>`
@@ -56,7 +58,7 @@ export function createUpcomingView({ app, ui, now }) {
                  <button type="button" class="memory-toolbar-btn" data-occ-action="skip" data-id="${esc(row.recurring_id)}" data-due="${esc(row.due_date)}">Skip</button>`}
           </div>
         </div>
-        ${amountHtml(row.share_pence ?? row.amount_pence, row.direction)}
+        ${amountHtml(row.share_pence ?? row.amount_pence, row.share_direction || row.direction)}
         ${badge}
       </div>`;
   }
@@ -68,11 +70,14 @@ export function createUpcomingView({ app, ui, now }) {
     const invest = app.state.assets.filter((a) => ['investment', 'pension'].includes(a.type) && (!a.archived || a.id === item?.asset_id))
       .map((a) => ({ value: a.id, label: a.name }));
     const isNew = !item?.id;
+    const kind = item?.to_account_id ? 'transfer' : (item?.direction || 'out');
+    const targets = app.state.accounts.filter((a) => !a.archived || a.id === item?.to_account_id).map((a) => ({ value: a.id, label: a.name }));
     return `
       <form class="task-form fin-inline-form" data-recurring-form novalidate>
         <div class="task-form-toggle" role="radiogroup" aria-label="Type">
-          <button type="button" class="task-toggle-btn${(item?.direction || 'out') === 'out' ? ' active' : ''}" data-dir="out">Payment</button>
-          <button type="button" class="task-toggle-btn${item?.direction === 'in' ? ' active' : ''}" data-dir="in">Income</button>
+          <button type="button" class="task-toggle-btn${kind === 'out' ? ' active' : ''}" data-dir="out">Payment</button>
+          <button type="button" class="task-toggle-btn${kind === 'in' ? ' active' : ''}" data-dir="in">Income</button>
+          <button type="button" class="task-toggle-btn${kind === 'transfer' ? ' active' : ''}" data-dir="transfer" title="Money moving between your accounts, e.g. pocket money">Transfer</button>
         </div>
         <div class="fin-form-row">
           <div class="fin-form-col"><label class="task-form-label">Name</label>
@@ -81,8 +86,12 @@ export function createUpcomingView({ app, ui, now }) {
             <input class="task-form-input" name="amount" inputmode="decimal" autocomplete="off" value="${item?.amount_pence ? esc(penceToInput(item.amount_pence)) : ''}"></div>
         </div>
         <div class="fin-form-row">
-          <div class="fin-form-col"><label class="task-form-label">Account</label>
+          <div class="fin-form-col"><label class="task-form-label" data-account-label>Account</label>
             <select class="task-form-input" name="account_id">${optionsHtml(accounts, item?.account_id || app.defaultAccountId())}</select></div>
+          <div class="fin-form-col" data-transfer-only><label class="task-form-label">To account</label>
+            <select class="task-form-input" name="to_account_id">${optionsHtml(targets, item?.to_account_id || '', { blank: 'Choose…' })}</select></div>
+        </div>
+        <div class="fin-form-row">
           <div class="fin-form-col"><label class="task-form-label">How often</label>
             <select class="task-form-input" name="frequency">${optionsHtml(FREQUENCIES, item?.frequency || 'monthly')}</select></div>
         </div>
@@ -93,7 +102,7 @@ export function createUpcomingView({ app, ui, now }) {
             <input class="task-form-input" type="date" name="end_date" value="${esc(item?.end_date || '')}"></div>
         </div>
         <div class="fin-form-row">
-          <div class="fin-form-col"><label class="task-form-label">Category</label>
+          <div class="fin-form-col" data-not-transfer><label class="task-form-label">Category</label>
             <select class="task-form-input" name="category_id">${optionsHtml(cats, item?.category_id || '', { blank: 'Uncategorised' })}</select></div>
           <div class="fin-form-col"><label class="task-form-label">Bank description contains</label>
             <input class="task-form-input" name="match_text" maxlength="200" autocomplete="off" value="${esc(item?.match_text || '')}" placeholder="used to match imported rows"></div>
@@ -121,7 +130,7 @@ export function createUpcomingView({ app, ui, now }) {
       ? `<div class="memory-item fin-edit-card">${formHtml(r)}</div>`
       : `<div class="memory-item fin-row${r.archived ? ' fin-archived' : ''}" data-recurring-id="${esc(r.id)}" role="button" tabindex="0">
           <div class="fin-row-main"><span class="memory-item-title">${esc(r.name)}</span>
-            <span class="fin-row-sub">${esc(r.frequency_label)} · ${esc(accountName(r.account_id))}${r.next_due ? ` · next ${esc(dayLabel(r.next_due))}` : ''}${r.archived ? ' · stopped' : ''}</span></div>
+            <span class="fin-row-sub">${esc(r.frequency_label)} · ${esc(route(r))}${r.next_due ? ` · next ${esc(dayLabel(r.next_due))}` : ''}${r.archived ? ' · stopped' : ''}</span></div>
           ${amountHtml(r.amount_pence, r.direction)}
         </div>`)).join('');
     return `
@@ -215,7 +224,9 @@ export function createUpcomingView({ app, ui, now }) {
 
   function wireForm(container, form) {
     const existing = items.find((r) => r.id === editing) || null;
-    let direction = existing?.direction || (editing?.startsWith?.('s') ? suggestions[Number(editing.slice(1))].direction : 'out');
+    // 'out' (payment), 'in' (income) or 'transfer' (between two accounts, e.g. pocket money).
+    let direction = existing?.to_account_id ? 'transfer'
+      : existing?.direction || (editing?.startsWith?.('s') ? suggestions[Number(editing.slice(1))].direction : 'out');
     const errorBox = form.querySelector('.fin-form-error');
     const fail = (msg) => { errorBox.textContent = msg; errorBox.hidden = !msg; };
     const close = () => { editing = null; render(container); };
@@ -223,21 +234,28 @@ export function createUpcomingView({ app, ui, now }) {
       form.querySelectorAll('[data-dir]').forEach((b) => b.classList.toggle('active', b.dataset.dir === direction));
       const outOnly = form.querySelector('[data-out-only]');
       if (outOnly) outOnly.hidden = direction !== 'out';
+      form.querySelector('[data-transfer-only]').hidden = direction !== 'transfer';
+      form.querySelector('[data-not-transfer]').hidden = direction === 'transfer';
+      form.querySelector('[data-account-label]').textContent = direction === 'transfer' ? 'From account' : 'Account';
     };
     form.querySelectorAll('[data-dir]').forEach((b) => b.addEventListener('click', () => { direction = b.dataset.dir; syncDir(); }));
     syncDir();
     form.querySelector('[data-action="cancel-recurring"]').addEventListener('click', close);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const transfer = direction === 'transfer';
       const body = {
         name: form.name.value.trim(), amount: form.amount.value.trim(), account_id: form.account_id.value,
-        frequency: form.frequency.value, direction, end_date: form.end_date.value || null,
-        category_id: form.category_id.value || null, match_text: form.match_text.value.trim(),
+        frequency: form.frequency.value, direction: transfer ? 'out' : direction, end_date: form.end_date.value || null,
+        category_id: transfer ? null : (form.category_id.value || null), match_text: form.match_text.value.trim(),
         liability_id: direction === 'out' ? (form.liability_id?.value || null) : null,
         asset_id: direction === 'out' ? (form.asset_id?.value || null) : null,
+        to_account_id: transfer ? form.to_account_id.value || null : null,
       };
       if (form.next_due.value) body.next_due = form.next_due.value;
       if (!body.name || !body.amount) { fail('Give it a name and an amount'); return; }
+      if (transfer && !body.to_account_id) { fail('Choose the account the money goes to'); return; }
+      if (transfer && body.to_account_id === body.account_id) { fail('Choose two different accounts'); return; }
       try {
         if (existing) await app.updateRecurring(existing.id, body);
         else await app.createRecurring(body);

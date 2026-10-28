@@ -19,6 +19,7 @@ from core.database import SessionLocal, engine
 from src.auth_helpers import require_user
 from src.finance import csv_io, imports
 from src.finance import budgets as bud
+from src.finance import children as kids
 from src.finance import insights
 from src.finance import loans
 from src.finance import members as mem
@@ -199,6 +200,7 @@ class RecurringCreate(BaseModel):
     match_text: str = ""
     liability_id: Optional[str] = None
     asset_id: Optional[str] = None
+    to_account_id: Optional[str] = None  # set for a regular transfer, e.g. pocket money
 
 
 class RecurringUpdate(BaseModel):
@@ -213,6 +215,7 @@ class RecurringUpdate(BaseModel):
     match_text: Optional[str] = None
     liability_id: Optional[str] = None
     asset_id: Optional[str] = None
+    to_account_id: Optional[str] = None  # set for a regular transfer, e.g. pocket money
     archived: Optional[bool] = None
 
 
@@ -221,6 +224,10 @@ class OccurrenceAction(BaseModel):
     date: Optional[str] = None
     amount: Optional[str] = None
     transaction_id: Optional[str] = None
+
+
+class SettingsUpdate(BaseModel):
+    junior_isa_limit: Optional[str] = None  # pounds, e.g. "9000"
 
 
 class BudgetSet(BaseModel):
@@ -665,6 +672,28 @@ def setup_finance_routes() -> APIRouter:
         with _session() as db:
             row = bud.set_budget(db, owner, category_id, body.limit, month=body.month)
             return {"category_id": row.category_id, "month": row.month.isoformat()[:7], "limit_pence": row.limit_pence}
+
+    # Children and settings (v3): specific paths before the generic routes below.
+
+    @router.get("/children")
+    def children(request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return kids.children_overview(db, owner)
+
+    @router.get("/settings")
+    def get_settings(request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return kids.settings(db, owner)
+
+    @router.patch("/settings")
+    def update_settings(body: SettingsUpdate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            if body.junior_isa_limit is not None:
+                kids.set_setting(db, owner, "junior_isa_limit_pence", body.junior_isa_limit)
+            return kids.settings(db, owner)
 
     # Recurring items (v2 stage 3): specific paths before the generic routes below.
 

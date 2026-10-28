@@ -16,6 +16,7 @@ export function createFinanceState({ api, storage, now }) {
     assets: [],            // including archived, with current values
     liabilities: [],
     members: [],           // household members, primary first, including archived
+    children: null,        // the Children section: each child, Junior ISAs, allowance, pocket money
     person: storage.person ? storage.person() : '', // whose figures: a member id, or '' for the household
     month: { year: today.getFullYear(), month: today.getMonth() + 1 },
     filters: { accountId: '', categoryId: '', direction: '', q: '' },
@@ -64,10 +65,12 @@ export function createFinanceState({ api, storage, now }) {
     // A remembered person who has since been deleted falls back to the household.
     // So does a household of one, where the person switcher is hidden.
     if (state.person && (!memberById(state.person) || state.members.length < 2)) state.person = '';
-    const [accounts, categories, networth, assets, liabilities] = await Promise.all([
+    const hasChildren = state.members.some((m) => m.relationship === 'child');
+    const [accounts, categories, networth, assets, liabilities, children] = await Promise.all([
       api.accounts(true), api.categories(), api.networth(undefined, personParam()), api.items('assets', true),
-      api.items('liabilities', true),
+      api.items('liabilities', true), hasChildren ? api.children() : Promise.resolve(null),
     ]);
+    state.children = children;
     state.accounts = accounts.accounts;
     state.totalPence = accounts.total_pence;
     state.categories = categories.categories;
@@ -240,6 +243,8 @@ export function createFinanceState({ api, storage, now }) {
     createMember: (body) => mutate(() => api.createMember(body)),
     updateMember: (id, body) => mutate(() => api.updateMember(id, body)),
     deleteMember: (id) => mutate(() => api.deleteMember(id)),
+    settings: () => api.settings(),
+    updateSettings: (body) => mutate(() => api.updateSettings(body)),
     commitImport: (body) => mutate(() => api.commitImport(body)),
     undoImport: (id) => mutate(() => api.undoImport(id)),
     // Import helpers, rules and saved mappings change no balances, so they

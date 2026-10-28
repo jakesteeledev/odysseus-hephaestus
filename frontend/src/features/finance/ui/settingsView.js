@@ -1,6 +1,6 @@
 /** Finance settings: household members, categories, categorisation rules, saved bank mappings and CSV export. */
 
-import { isoDay, monthBounds } from '../domain/money.js';
+import { isoDay, monthBounds, penceToInput } from '../domain/money.js';
 import { ICONS, avatarHtml, categoryDot, emptyHtml, esc, optionsHtml } from './dom.js';
 
 const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'];
@@ -12,13 +12,14 @@ const RELATIONSHIPS = [['partner', 'Partner'], ['child', 'Child'], ['other', 'Ot
 export function createSettingsView({ app, ui, now }) {
   let rules = [];
   let mappings = [];
+  let settings = null;
   let editingCategory = null; // id, 'new' or null
   let editingMember = null; // id, 'new' or null
   let errorText = '';
 
   async function load() {
     try {
-      [rules, mappings] = await Promise.all([app.listRules(), app.listMappings()]);
+      [rules, mappings, settings] = await Promise.all([app.listRules(), app.listMappings(), app.settings()]);
       errorText = '';
     } catch (err) {
       errorText = err.message;
@@ -172,6 +173,22 @@ export function createSettingsView({ app, ui, now }) {
         </div>`).join('') || emptyHtml('Save a mapping from the import preview to reuse it next time.')}</div>`;
   }
 
+  function childrenHtml() {
+    if (!settings || !app.state.members.some((m) => m.relationship === 'child')) return '';
+    return `
+      <h3 class="fin-section-title">Children</h3>
+      <form class="task-form" data-children-settings novalidate>
+        <div class="fin-form-row">
+          <div class="fin-form-col"><label class="task-form-label" for="fin-jisa-limit">Junior ISA allowance per tax year (£)</label>
+            <input id="fin-jisa-limit" class="task-form-input" name="junior_isa_limit" inputmode="decimal" autocomplete="off"
+              value="${esc(penceToInput(settings.junior_isa_limit_pence))}"></div>
+        </div>
+        <div class="fin-hint">Per child, from 6 April to 5 April. £9,000 in 2026/27; change it if the government does.</div>
+        <div class="fin-form-error" role="alert" hidden></div>
+        <div class="task-form-actions"><button type="submit" class="task-btn task-btn-primary">Save</button></div>
+      </form>`;
+  }
+
   function exportHtml() {
     const today = now();
     const bounds = monthBounds({ year: today.getFullYear(), month: today.getMonth() + 1 });
@@ -196,6 +213,7 @@ export function createSettingsView({ app, ui, now }) {
       <div class="admin-card fin-card">
         ${errorText ? `<div class="fin-form-error" role="alert">${esc(errorText)}</div>` : ''}
         ${membersHtml()}
+        ${childrenHtml()}
         ${categoriesHtml()}
         ${rulesHtml()}
         ${mappingsHtml()}
@@ -214,6 +232,17 @@ export function createSettingsView({ app, ui, now }) {
     });
     const memberFormEl = container.querySelector('[data-member-form]');
     if (memberFormEl) wireMemberForm(container, memberFormEl);
+    const childForm = container.querySelector('[data-children-settings]');
+    childForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorBox = childForm.querySelector('.fin-form-error');
+      try {
+        settings = await app.updateSettings({ junior_isa_limit: childForm.junior_isa_limit.value.trim() });
+        errorBox.hidden = true;
+        ui.showToast('Allowance saved');
+        rerender();
+      } catch (err) { errorBox.textContent = err.message; errorBox.hidden = false; }
+    });
     container.querySelector('[data-action="new-category"]').addEventListener('click', () => { editingCategory = 'new'; rerender(); });
     container.querySelectorAll('[data-category-id]').forEach((row) => {
       const open = () => { editingCategory = row.dataset.categoryId; rerender(); };

@@ -99,9 +99,18 @@ export function dayLabel(iso) {
   return date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+/** "1 Mar 2036" for an ISO day. */
+export function longDate(iso) {
+  const [y, m, d] = String(iso).split('-').map(Number);
+  if (!y || !m || !d) return String(iso || '');
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 export const ACCOUNT_TYPE_LABELS = {
   current: 'Current',
   savings: 'Savings',
   credit_card: 'Credit card',
   cash: 'Cash',
+  child_savings: 'Child savings',
+  child_current: 'Child current',
 };

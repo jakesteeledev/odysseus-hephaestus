@@ -7,6 +7,7 @@ import { ACCOUNT_TYPE_LABELS, formatPence } from '../domain/money.js';
 import { CONTRIBUTION_TYPES, typeLabel } from '../domain/items.js';
 import { avatarHtml, balanceHtml, emptyHtml, esc } from './dom.js';
 import { hasHousehold, ownersHtml, possessive, shareNote } from './ownerChips.js';
+import { childrenSectionHtml, juniorIsaById, juniorIsaNote } from './childrenSection.js';
 
 export function createOverviewView({ app, accountsView, itemView }) {
   let editing = null; // { kind, id } or { kind, id: 'new' }
@@ -26,6 +27,8 @@ export function createOverviewView({ app, accountsView, itemView }) {
         parts.push(`equity ${formatPence(item.equity_pence)}`);
       }
       if (item.owner_warning) parts.push('owners differ from the property');
+      const isa = juniorIsaById(app).get(item.id);
+      if (isa) parts.push(juniorIsaNote(isa));
     }
     if (item.archived) parts.push('archived');
     return parts.join(' · ') + shareNote(app, item.full_value_pence ?? item.value_pence, item.value_pence, formatPence);
@@ -120,6 +123,7 @@ export function createOverviewView({ app, accountsView, itemView }) {
         <div class="fin-hint">Account balances count automatically; credit cards count as money owed.</div>
         ${breakdownHtml(worth)}
       </div>
+      ${childrenSectionHtml(app)}
       ${sideHtml('asset')}
       ${sideHtml('liability')}
       <div data-accounts-slot></div>`;
