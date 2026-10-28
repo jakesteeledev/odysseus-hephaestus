@@ -6,9 +6,10 @@
  */
 
 import { formatPence, monthLabel } from '../domain/money.js';
-import { amountHtml, esc, optionsHtml } from './dom.js';
+import { amountHtml, avatarHtml, esc, optionsHtml } from './dom.js';
+import { hasHousehold, possessive } from './ownerChips.js';
 import {
-  barList, budgetBullets, incomeSpendingChart, monthShort, netWorthChart, tableDetails, trendChart,
+  barList, budgetBullets, incomeSpendingChart, membersChart, monthShort, netWorthChart, tableDetails, trendChart,
 } from './charts.js';
 
 const RANGES = [{ value: '6m', label: '6 months' }, { value: '1y', label: '1 year' }, { value: 'all', label: 'All time' }];
@@ -53,8 +54,29 @@ export function createInsightsView({ app, monthNav, storage }) {
       </div>`;
   }
 
+  /** Members with a line in the household history: anyone who has owned something in the range. */
+  function chartMembers() {
+    const seen = new Set((data.history || []).flatMap((p) => Object.keys(p.by_member || {})));
+    return app.state.members.filter((m) => seen.has(m.id));
+  }
+
+  function memberLegend(members) {
+    return `<div class="fin-legend">${members.map((m) => `
+      <span class="fin-legend-item">${avatarHtml(m, { title: false })}${esc(m.display_name)}</span>`).join('')}</div>`;
+  }
+
+  function movedHtml(s) {
+    if (!s?.moved_in_pence && !s?.moved_out_pence) return '';
+    const parts = [];
+    if (s.moved_in_pence) parts.push(`${formatPence(s.moved_in_pence)} moved in from other members`);
+    if (s.moved_out_pence) parts.push(`${formatPence(s.moved_out_pence)} moved out to other members`);
+    return `<div class="fin-moved">${esc(parts.join(' · '))}</div>`;
+  }
+
   function shell(container) {
     const s = app.state.summary;
+    const person = app.personMember();
+    const members = !person && hasHousehold(app) ? chartMembers() : [];
     const categories = app.state.categories.filter((c) => c.kind === 'expense').map((c) => ({ value: c.id, label: c.name }));
     container.innerHTML = `
       <div class="fin-filters fin-insight-filters">
@@ -66,19 +88,23 @@ export function createInsightsView({ app, monthNav, storage }) {
       </div>
       ${errorText ? `<div class="fin-form-error" role="alert">${esc(errorText)}</div>` : ''}
       <div class="admin-card fin-card">
-        <h2 class="fin-card-title">${esc(monthLabel(app.state.month))}</h2>
+        <h2 class="fin-card-title">${esc(monthLabel(app.state.month))}${person ? ` · ${esc(possessive(person))} share` : ''}</h2>
         ${s ? `<div class="fin-stats">
           <div class="fin-stat"><span class="fin-stat-label">Money in</span>${amountHtml(s.total_in_pence, 'in')}</div>
           <div class="fin-stat"><span class="fin-stat-label">Money out</span>${amountHtml(s.total_out_pence, 'out')}</div>
           <div class="fin-stat"><span class="fin-stat-label">Net</span>${amountHtml(Math.abs(s.net_pence), s.net_pence >= 0 ? 'in' : 'out')}</div>
         </div>` : ''}
-        <div class="fin-hint">Transfers between your accounts are not counted as money in or out.</div>
+        ${movedHtml(s)}
+        <div class="fin-hint">${person
+          ? 'Joint accounts are split equally between their owners. Transfers between members show as moved, not as money in or out.'
+          : 'Transfers between your accounts are not counted as money in or out.'}</div>
       </div>
       ${card('spending', 'Spending by category', monthLabel(app.state.month))}
       ${card('budgets', 'Budget vs actual', monthLabel(app.state.month), legend([
         { key: 'rect', cls: 'fin-c-accent', label: 'Spent' }, { key: 'tick', cls: 'fin-c-none', label: 'Limit' },
         { key: 'rect', cls: 'fin-c-over', label: 'Over budget' }]))}
-      ${card('networth', 'Net worth', 'Month ends', legend([
+      ${members.length > 1 ? card('members', 'Net worth by person', 'Month ends', memberLegend(members)) : ''}
+      ${card('networth', person ? `${possessive(person)} net worth` : 'Net worth', 'Month ends', legend([
         { key: 'line', cls: 'fin-c-accent', label: 'Net worth' },
         { key: 'rect', cls: 'fin-c-neutral', label: 'Assets (above the line)' },
         { key: 'rect', cls: 'fin-c-neutral', label: 'Liabilities (below the line)' }]))}
@@ -121,6 +147,13 @@ export function createInsightsView({ app, monthNav, storage }) {
     } else empty(budgetSlot, 'No budgets for this month. Add them in the Budgets tab.');
 
     const history = data.history || [];
+    const memberSlot = slot(container, 'members');
+    if (history.length && memberSlot) {
+      const members = chartMembers();
+      membersChart(memberSlot, history, members);
+      tableSlot(container, 'members').replaceChildren(tableDetails(['Month', ...members.map((m) => m.display_name)],
+        history.map((p) => [monthShort(p.month, true), ...members.map((m) => formatPence(p.by_member?.[m.id] ?? 0))])));
+    }
     if (history.length) {
       netWorthChart(slot(container, 'networth'), history);
       tableSlot(container, 'networth').replaceChildren(tableDetails(['Month', 'Net worth', 'Assets', 'Liabilities'],

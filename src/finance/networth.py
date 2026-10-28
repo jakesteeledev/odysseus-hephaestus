@@ -170,6 +170,9 @@ def create_item(db: Session, owner, kind: str, *, value=None, value_date=None, *
         item.linked_asset_id = _check_link(db, owner, item.liability_type, data.get("linked_asset_id"))
     db.add(item)
     db.flush()
+    from src.finance.members import assign_default_owner
+
+    assign_default_owner(db, owner, kind, item.id)
     if value not in (None, ""):
         set_valuation(db, owner, kind, item.id, value=value, on=value_date)
     return item
@@ -206,6 +209,9 @@ def delete_item(db: Session, owner, kind: str, item_id) -> None:
             FinanceLiability.owner == owner, FinanceLiability.linked_asset_id == item.id).first() is not None
     if has_history:
         raise FinanceConflict(f"this {kind} has history or links; archive it instead")
+    from src.finance.members import remove_owners
+
+    remove_owners(db, owner, kind, item.id)
     db.delete(item)
     db.flush()
 
@@ -370,22 +376,59 @@ def delete_contribution(db: Session, owner, contribution_id) -> None:
 
 
 def list_items(db: Session, owner, kind: str, *, include_archived: bool = False,
-               as_of: Optional[date] = None) -> list[dict]:
-    """Assets or liabilities with their current value (and extras by type)."""
+               as_of: Optional[date] = None, person: Optional[str] = None) -> list[dict]:
+    """Assets or liabilities with their current value (and extras by type).
+
+    With *person* (a member id), only items they own are listed, and
+    ``share_pence`` is their share of the value. Without it, ``share_pence``
+    is the whole value.
+    """
+    from src.finance.members import ensure_household, owner_map, share_of
+
     owner = _require_owner(owner)
+    ensure_household(db, owner)
     model = _model(kind)
     query = db.query(model).filter(model.owner == owner)
     if not include_archived:
         query = query.filter(model.archived.is_(False))
     items = query.order_by(func.lower(model.name)).all()
-    return [_item_dict(db, owner, kind, item, as_of) for item in items]
+    owners = owner_map(db, owner, ("asset", "liability"))
+    out = []
+    for item in items:
+        owner_ids = owners.get((kind, item.id), [])
+        if person is not None and person not in owner_ids:
+            continue
+        row = _item_dict(db, owner, kind, item, as_of, owners=owners)
+        row["share_pence"] = share_of(row["value_pence"], owner_ids, person)
+        out.append(row)
+    return out
 
 
-def _item_dict(db: Session, owner: str, kind: str, item, as_of: Optional[date]) -> dict:
+def _owner_warning(db: Session, owner: str, liability: FinanceLiability, owners: dict) -> Optional[str]:
+    """A mortgage needn't have the same owners as its property, but say so when they differ."""
+    if not liability.linked_asset_id:
+        return None
+    mine = set(owners.get(("liability", liability.id), []))
+    theirs = set(owners.get(("asset", liability.linked_asset_id), []))
+    if not mine or not theirs or mine == theirs:
+        return None
+    house = db.query(FinanceAsset.name).filter(FinanceAsset.owner == owner,
+                                               FinanceAsset.id == liability.linked_asset_id).scalar()
+    return f"Its owners are different from the owners of {house or 'the property'}."
+
+
+def _item_dict(db: Session, owner: str, kind: str, item, as_of: Optional[date], *,
+               owners: Optional[dict] = None) -> dict:
+    if owners is None:
+        from src.finance.members import owner_map
+
+        owners = owner_map(db, owner, ("asset", "liability"))
+    owner_ids = owners.get((kind, item.id), [])
     data = {
         "kind": kind, "id": item.id, "name": item.name,
         "type": item.asset_type if kind == "asset" else item.liability_type,
         "subtype": item.subtype or "", "notes": item.notes or "", "archived": bool(item.archived),
+        "owner_ids": list(owner_ids), "joint": len(owner_ids) > 1,
     }
     if kind == "asset":
         snap = latest_valuation(db, owner, "asset", item.id, as_of)
@@ -410,15 +453,28 @@ def _item_dict(db: Session, owner: str, kind: str, item, as_of: Optional[date]) 
         data.update(lender=item.lender or "", value_pence=balance,
                     value_date=when.isoformat() if when else None, linked_asset_id=item.linked_asset_id,
                     has_schedule=get_schedule(db, owner, item.id) is not None,
-                    interest_rate_percent=(item.interest_bp / 100) if item.interest_bp is not None else None)
+                    interest_rate_percent=(item.interest_bp / 100) if item.interest_bp is not None else None,
+                    owner_warning=_owner_warning(db, owner, item, owners))
     return data
 
 
-def net_worth(db: Session, owner, *, as_of: Optional[date] = None) -> dict:
-    """Net worth with assets and liabilities grouped by type."""
+def net_worth(db: Session, owner, *, as_of: Optional[date] = None, person: Optional[str] = None) -> dict:
+    """Net worth with assets and liabilities grouped by type, and each member's share.
+
+    Household figures count every item once at full value. A member's figure
+    uses their equal share of each item they own (see ``members.split_pence``),
+    so the members' figures always add up exactly to the household's.
+
+    With *person* (a member id), only their items are listed and every
+    ``value_pence`` and total is their share; ``full_value_pence`` keeps the
+    whole value of joint items.
+    """
+    from src.finance.members import ensure_household, owner_map, share_of, split_pence
+
     owner = _require_owner(owner)
-    asset_groups: dict[str, list] = {}
-    liability_groups: dict[str, list] = {}
+    ensure_household(db, owner)
+    owners = owner_map(db, owner)
+    rows: list[tuple[str, str, dict]] = []  # (side, group key, row)
 
     accounts = db.query(FinanceAccount).filter(FinanceAccount.owner == owner).order_by(
         FinanceAccount.sort_order, FinanceAccount.name).all()
@@ -427,18 +483,41 @@ def net_worth(db: Session, owner, *, as_of: Optional[date] = None) -> dict:
         balance = balances.get(account.id, account.opening_balance_pence)
         if account.archived and balance == 0:
             continue
+        owner_ids = owners.get(("account", account.id), [])
         row = {"kind": "account", "id": account.id, "name": account.name, "type": account.account_type,
-               "archived": bool(account.archived)}
+               "archived": bool(account.archived), "owner_ids": list(owner_ids), "joint": len(owner_ids) > 1}
         if account.account_type == "credit_card":
-            liability_groups.setdefault(CARD_LIABILITY_GROUP, []).append({**row, "value_pence": -balance})
+            rows.append(("liability", CARD_LIABILITY_GROUP, {**row, "value_pence": -balance}))
         else:
-            asset_groups.setdefault(ACCOUNT_ASSET_GROUP, []).append({**row, "value_pence": balance})
+            rows.append(("asset", ACCOUNT_ASSET_GROUP, {**row, "value_pence": balance}))
 
-    for kind, groups in (("asset", asset_groups), ("liability", liability_groups)):
+    for kind in ("asset", "liability"):
         for item in list_items(db, owner, kind, include_archived=True, as_of=as_of):
             if item["archived"] and item["value_pence"] == 0:
                 continue
-            groups.setdefault(item["type"], []).append(item)
+            item.pop("share_pence", None)
+            rows.append((kind, item["type"], item))
+
+    # Each member's share, from the full household rows.
+    member_totals: dict[str, list[int]] = {}
+    for side, _key, row in rows:
+        ids = row["owner_ids"]
+        for member_id, share in zip(ids, split_pence(row["value_pence"], len(ids))):
+            totals = member_totals.setdefault(member_id, [0, 0])
+            totals[0 if side == "asset" else 1] += share
+
+    if person is not None:
+        kept = []
+        for side, key, row in rows:
+            if person in row["owner_ids"]:
+                kept.append((side, key, {**row, "full_value_pence": row["value_pence"],
+                                         "value_pence": share_of(row["value_pence"], row["owner_ids"], person)}))
+        rows = kept
+
+    asset_groups: dict[str, list] = {}
+    liability_groups: dict[str, list] = {}
+    for side, key, row in rows:
+        (asset_groups if side == "asset" else liability_groups).setdefault(key, []).append(row)
 
     def grouped(groups, labels):
         out = []
@@ -455,9 +534,31 @@ def net_worth(db: Session, owner, *, as_of: Optional[date] = None) -> dict:
     liabilities_total = sum(g["total_pence"] for g in liabilities)
     return {
         "as_of": as_of.isoformat() if as_of else None,
+        "person": person,
         "net_worth_pence": assets_total - liabilities_total,
         "assets_total_pence": assets_total,
         "liabilities_total_pence": liabilities_total,
         "assets": assets,
         "liabilities": liabilities,
+        "by_member": _by_member(db, owner, member_totals),
     }
+
+
+def _by_member(db: Session, owner: str, member_totals: dict) -> list[dict]:
+    """Each member's assets, liabilities and net worth, primary member first.
+
+    Archived members are listed only while they still own something.
+    """
+    from src.finance.members import member_to_dict
+    from src.finance.models import FinanceMember
+
+    out = []
+    members = db.query(FinanceMember).filter(FinanceMember.owner == owner).order_by(
+        FinanceMember.sort_order, FinanceMember.id)
+    for member in members:
+        assets, liabilities = member_totals.get(member.id, (0, 0))
+        if member.archived and member.id not in member_totals:
+            continue
+        out.append({"member": member_to_dict(member), "assets_pence": assets, "liabilities_pence": liabilities,
+                    "net_worth_pence": assets - liabilities})
+    return out

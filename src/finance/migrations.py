@@ -9,8 +9,14 @@ runs idempotent ``_migrate_*`` helpers), so finance keeps its own small one:
   is copied to ``FINANCE_BACKUP_DIR`` with SQLite's online backup API. If the
   copy fails, nothing is migrated.
 - Every step is idempotent (``create_all`` skips existing tables; column
-  additions check ``PRAGMA table_info`` first) and only ever adds tables or
-  nullable columns, so v1 rows are never rewritten.
+  additions check ``PRAGMA table_info`` first) and only ever adds tables,
+  nullable columns or new rows, so existing rows are never rewritten.
+  Step 6 inserts a primary household member per user and makes them the
+  owner of every existing account, asset and liability.
+- Step 7 is the one exception to "only adds": SQLite can't change a CHECK
+  constraint, so ``finance_accounts`` is rebuilt to allow the child account
+  types. Every row is copied unchanged, inside one transaction that rolls
+  back unless the row count matches and every foreign key still resolves.
 """
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ from core.database import Base
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 
 
 def _create(bind, tables) -> None:
@@ -74,7 +80,94 @@ def _step_5(bind) -> None:
     _create(bind, V5_TABLES)
 
 
-STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4, 5: _step_5}
+def _step_6(bind) -> None:
+    """Household members: one primary member per user, owning all existing items.
+
+    Only inserts rows into the two new tables; existing rows are not touched.
+    """
+    from sqlalchemy.orm import Session
+
+    from src.finance.members import ensure_household
+    from src.finance.models import V6_TABLES
+
+    _create(bind, V6_TABLES)
+    owners: set[str] = set()
+    with bind.connect() as conn:
+        for table in ("finance_accounts", "finance_assets", "finance_liabilities", "finance_categories"):
+            owners.update(row[0] for row in conn.execute(text(f"SELECT DISTINCT owner FROM {table}")) if row[0])
+    with Session(bind=bind) as db:
+        for owner in sorted(owners):
+            ensure_household(db, owner)
+        db.commit()
+
+
+OLD_ACCOUNT_CHECK = "account_type IN ('current', 'savings', 'credit_card', 'cash')"
+NEW_ACCOUNT_CHECK = ("account_type IN ('current', 'savings', 'credit_card', 'cash', "
+                     "'child_savings', 'child_current')")
+
+
+def _rebuild_accounts_table(bind) -> None:
+    """Rebuild finance_accounts with the wider account type CHECK (SQLite's
+    documented table-rebuild procedure). Skipped when already allowed."""
+    with bind.connect() as conn:
+        row = conn.execute(text(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'finance_accounts'")).fetchone()
+        indexes = [r[0] for r in conn.execute(text(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'finance_accounts' "
+            "AND sql IS NOT NULL"))]
+    if row is None or "child_savings" in row[0]:
+        return
+    if OLD_ACCOUNT_CHECK not in row[0] or not row[0].startswith("CREATE TABLE finance_accounts ("):
+        raise RuntimeError("finance_accounts has an unexpected shape; not rebuilding it")
+    create_new = row[0].replace(OLD_ACCOUNT_CHECK, NEW_ACCOUNT_CHECK).replace(
+        "CREATE TABLE finance_accounts (", "CREATE TABLE finance_accounts_v7 (", 1)
+
+    raw = bind.raw_connection()
+    con = raw.driver_connection
+    previous_isolation = con.isolation_level
+    con.isolation_level = None  # manual transaction control
+    try:
+        # Must be set outside a transaction; dropping the old table would
+        # otherwise trip the foreign keys that point at it.
+        con.execute("PRAGMA foreign_keys=OFF")
+        if con.execute("PRAGMA foreign_keys").fetchone()[0] != 0:
+            raise RuntimeError("could not pause foreign keys to rebuild finance_accounts")
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            before = con.execute("SELECT * FROM finance_accounts ORDER BY id").fetchall()
+            con.execute(create_new)
+            con.execute("INSERT INTO finance_accounts_v7 SELECT * FROM finance_accounts")
+            con.execute("DROP TABLE finance_accounts")
+            con.execute("ALTER TABLE finance_accounts_v7 RENAME TO finance_accounts")
+            for sql in indexes:
+                con.execute(sql)
+            after = con.execute("SELECT * FROM finance_accounts ORDER BY id").fetchall()
+            if after != before:
+                raise RuntimeError("finance_accounts rows changed while rebuilding; rolled back")
+            broken = con.execute("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                raise RuntimeError(f"foreign keys broken while rebuilding finance_accounts: {broken[:3]}")
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+    finally:
+        con.execute("PRAGMA foreign_keys=ON")
+        con.isolation_level = previous_isolation
+        raw.close()
+
+
+def _step_7(bind) -> None:
+    """Children: settings table, recurring transfers and child account types."""
+    from src.finance.models import V7_TABLES
+
+    _create(bind, V7_TABLES)
+    _add_column(bind, "finance_recurring", "to_account_id", "VARCHAR REFERENCES finance_accounts(id)")
+    if bind.url.get_backend_name() == "sqlite":
+        _rebuild_accounts_table(bind)
+
+
+STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4, 5: _step_5, 6: _step_6, 7: _step_7}
 
 
 def _current_version(bind) -> int:

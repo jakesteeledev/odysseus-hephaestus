@@ -148,7 +148,8 @@ def _direction(value) -> str:
 # ── Serialisation ───────────────────────────────────────────────────────
 
 
-def account_to_dict(account: FinanceAccount, balance_pence: Optional[int] = None) -> dict:
+def account_to_dict(account: FinanceAccount, balance_pence: Optional[int] = None,
+                    owner_ids: Optional[list] = None) -> dict:
     data = {
         "id": account.id,
         "name": account.name,
@@ -161,6 +162,9 @@ def account_to_dict(account: FinanceAccount, balance_pence: Optional[int] = None
     }
     if balance_pence is not None:
         data["balance_pence"] = balance_pence
+    if owner_ids is not None:
+        data["owner_ids"] = list(owner_ids)
+        data["joint"] = len(owner_ids) > 1
     return data
 
 
@@ -239,6 +243,9 @@ def create_account(db: Session, owner, *, name, account_type="current", opening_
     )
     db.add(account)
     db.flush()
+    from src.finance.members import assign_default_owner
+
+    assign_default_owner(db, owner, "account", account.id)
     return account
 
 
@@ -276,6 +283,9 @@ def delete_account(db: Session, owner, account_id) -> None:
     db.query(FinanceImportBatch).filter(
         FinanceImportBatch.owner == owner, FinanceImportBatch.account_id == account.id
     ).delete(synchronize_session=False)
+    from src.finance.members import remove_owners
+
+    remove_owners(db, owner, "account", account.id)
     db.delete(account)
     db.flush()
 
@@ -302,20 +312,38 @@ def account_balances(db: Session, owner, account_ids: Optional[Iterable[str]] = 
     return {account_id: int(opening) + int(moved) for account_id, opening, moved in query.all()}
 
 
-def list_accounts(db: Session, owner, *, include_archived: bool = False) -> list[dict]:
+def list_accounts(db: Session, owner, *, include_archived: bool = False, person: Optional[str] = None) -> list[dict]:
+    """Accounts with balances and owners.
+
+    With *person* (a member id), only accounts they own are listed, and
+    ``share_pence`` is their share of the balance. Without it, ``share_pence``
+    is the whole balance.
+    """
+    from src.finance.members import ensure_household, owners_of, share_of
+
     owner = _require_owner(owner)
+    ensure_household(db, owner)
     query = db.query(FinanceAccount).filter(FinanceAccount.owner == owner)
     if not include_archived:
         query = query.filter(FinanceAccount.archived.is_(False))
     accounts = query.order_by(FinanceAccount.sort_order, FinanceAccount.name).all()
     balances = account_balances(db, owner, [a.id for a in accounts])
-    return [account_to_dict(a, balances.get(a.id, a.opening_balance_pence)) for a in accounts]
+    owners = owners_of(db, owner, "account", [a.id for a in accounts])
+    out = []
+    for account in accounts:
+        owner_ids = owners.get(account.id, [])
+        if person is not None and person not in owner_ids:
+            continue
+        row = account_to_dict(account, balances.get(account.id, account.opening_balance_pence), owner_ids)
+        row["share_pence"] = share_of(row["balance_pence"], owner_ids, person)
+        out.append(row)
+    return out
 
 
-def accounts_overview(db: Session, owner) -> dict:
-    """Active accounts with balances, plus their total."""
-    accounts = list_accounts(db, owner)
-    return {"accounts": accounts, "total_pence": sum(a["balance_pence"] for a in accounts)}
+def accounts_overview(db: Session, owner, *, person: Optional[str] = None) -> dict:
+    """Active accounts with balances, plus their total (the person's share with *person*)."""
+    accounts = list_accounts(db, owner, person=person)
+    return {"accounts": accounts, "total_pence": sum(a["share_pence"] for a in accounts)}
 
 
 # ── Categories ──────────────────────────────────────────────────────────
@@ -643,9 +671,19 @@ class TransactionFilter:
     direction: Optional[str] = None
     search: str = ""
     include_transfers: bool = True
+    person: Optional[str] = None  # member id: only accounts they own
 
 
 def _filtered(db: Session, owner: str, flt: TransactionFilter):
+    query = _base_filtered(db, owner, flt)
+    if flt.person:
+        from src.finance.people import account_owners, owned_accounts
+
+        query = query.filter(FinanceTransaction.account_id.in_(owned_accounts(account_owners(db, owner), flt.person)))
+    return query
+
+
+def _base_filtered(db: Session, owner: str, flt: TransactionFilter):
     query = db.query(FinanceTransaction).filter(FinanceTransaction.owner == owner)
     if flt.start is not None:
         query = query.filter(FinanceTransaction.date >= flt.start)
@@ -667,7 +705,12 @@ def _filtered(db: Session, owner: str, flt: TransactionFilter):
 
 
 def list_transactions(db: Session, owner, flt: Optional[TransactionFilter] = None, *, limit: Optional[int] = None) -> list[dict]:
-    """Transactions newest first. Transfer rows include the other side's account."""
+    """Transactions newest first. Transfer rows include the other side's account.
+
+    Each row carries its account's ``owner_ids`` and ``share_pence``: the
+    filter's person's share of the amount (the whole amount without one).
+    Transfers between accounts with different owners are ``between_members``.
+    """
     owner = _require_owner(owner)
     flt = flt or TransactionFilter()
     query = _filtered(db, owner, flt).order_by(
@@ -684,8 +727,11 @@ def list_transactions(db: Session, owner, flt: Optional[TransactionFilter] = Non
         ):
             other_side[(side.transfer_id, side.direction)] = side.account_id
     from src.finance.loans import payment_links
+    from src.finance.members import share_of
     from src.finance.networth import contribution_links
+    from src.finance.people import account_owners, between_members
 
+    owners = account_owners(db, owner)
     out_ids = [t.id for t in rows if t.direction == "out"]
     links = contribution_links(db, owner, out_ids)
     payments = payment_links(db, owner, out_ids)
@@ -695,26 +741,40 @@ def list_transactions(db: Session, owner, flt: Optional[TransactionFilter] = Non
         if tx.transfer_id:
             counterpart = other_side.get((tx.transfer_id, "in" if tx.direction == "out" else "out"))
         row = transaction_to_dict(tx, transfer_account_id=counterpart)
+        row["owner_ids"] = owners.get(tx.account_id, [])
+        row["share_pence"] = share_of(tx.amount_pence, row["owner_ids"], flt.person)
+        if tx.transfer_id:
+            row["between_members"] = between_members(owners, tx.account_id, counterpart)
         row["contribution_asset_id"] = links.get(tx.id)
         row["payment_liability_id"] = payments.get(tx.id)
         result.append(row)
     return result
 
 
-def summary(db: Session, owner, *, start: date, end: date, account_id: Optional[str] = None) -> dict:
+def summary(db: Session, owner, *, start: date, end: date, account_id: Optional[str] = None,
+            person: Optional[str] = None) -> dict:
     """Totals in/out, net and breakdown by category for ``start <= date < end``.
 
     Transfers are excluded: they move money, they are not income or spending.
+    With *person*, every figure is their share, and ``moved_in_pence`` /
+    ``moved_out_pence`` show money transferred to or from other members.
     """
+    from src.finance.people import account_owners, moved, shared_totals, transfer_pairs
+
     owner = _require_owner(owner)
     flt = TransactionFilter(start=start, end=end, account_id=account_id, include_transfers=False)
-    rows = (
-        _filtered(db, owner, flt)
-        .with_entities(FinanceTransaction.direction, FinanceTransaction.category_id,
+    grouped = (
+        _base_filtered(db, owner, flt)
+        .with_entities(FinanceTransaction.direction, FinanceTransaction.category_id, FinanceTransaction.account_id,
                        func.sum(FinanceTransaction.amount_pence), func.count(FinanceTransaction.id))
-        .group_by(FinanceTransaction.direction, FinanceTransaction.category_id)
+        .group_by(FinanceTransaction.direction, FinanceTransaction.category_id, FinanceTransaction.account_id)
         .all()
     )
+    owners = account_owners(db, owner)
+    totals = shared_totals((((d, c), a, t, n) for d, c, a, t, n in grouped), owners, person)
+    rows = [(d, c, total, count) for (d, c), (total, count) in totals.items() if total or count]
+    moves = moved(transfer_pairs(db, owner, start=start, end=end), owners, person, account_id=account_id).get(
+        None, {"in": 0, "out": 0})
     categories = {c.id: c for c in db.query(FinanceCategory).filter(FinanceCategory.owner == owner)}
     total_in = total_out = 0
     spend, income = [], []
@@ -740,6 +800,9 @@ def summary(db: Session, owner, *, start: date, end: date, account_id: Optional[
         "total_in_pence": total_in,
         "total_out_pence": total_out,
         "net_pence": total_in - total_out,
+        "moved_in_pence": moves["in"],
+        "moved_out_pence": moves["out"],
+        "person": person,
         "spend_by_category": sorted(spend, key=by_total),
         "income_by_category": sorted(income, key=by_total),
     }

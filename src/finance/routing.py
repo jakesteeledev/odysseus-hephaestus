@@ -15,9 +15,14 @@ from __future__ import annotations
 import re
 
 FINANCE_TOOLS = frozenset({"query_finances", "add_transaction", "add_transfer", "update_valuation",
-                           "manage_recurring", "set_budget"})
+                           "manage_recurring", "set_budget", "manage_members"})
 
 _MONEY_AMOUNT = r"(?:£\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s*(?:pounds?|quid|gbp)\b)"
+# v3: people in the household, and money words that make a mention of them a finance question.
+_PEOPLE = (r"family|partner|kids?|children|my\s+(?:wife|husband|son|daughter|partner)|"
+           r"(?:our|the)\s+(?:kids|children|family)")
+_MONEY_WORDS = (r"\b(?:money|net\s*worth|worth|savings|accounts?|isas?|finances|balances?|spending|spent|"
+                r"pension|owe|debts?|budget|share|assets)\b")
 
 FINANCE_FAMILY_PATTERN = (
     r"\b(?:financ(?:e|es|ial)|net\s*worth|outgoings|expenses|income|salary|wages|savings|"
@@ -38,6 +43,13 @@ FINANCE_FAMILY_PATTERN = (
     r"|\b(?:upcoming|regular)\s+(?:payments?|income)\b|\bcoming\s+out\s+of\s+my\b"
     # v2 stage 4: budgets.
     r"|\b(?:left\s+to\s+spend|overspent|over\s+budget|under\s+budget|spending\s+limit)\b"
+    # v3: household members, joint ownership and children.
+    r"|\b(?:household|joint\s+(?:accounts?|mortgage|savings|names?)|junior\s+(?:isa|sipp)s?|jisas?|"
+    r"pocket\s+money|tax\s+year|child\s+(?:savings|current)\s+accounts?|jointly|who\s+owns)\b"
+    r"|\bmake\b.{0,40}\bjoint\b|\bjoint\s+with\b"
+    rf"|\b(?:{_PEOPLE})\b(?=.{{0,40}}{_MONEY_WORDS})"
+    rf"|{_MONEY_WORDS}(?=.{{0,40}}\b(?:{_PEOPLE})\b)"
+    r"|\b[a-z]+(?:'s|s')\s+(?:net\s*worth|savings|isas?|accounts?|pension|money|share|balances?)\b"
 )
 FINANCE_FAMILY_RE = re.compile(FINANCE_FAMILY_PATTERN, re.I)
 
@@ -86,6 +98,23 @@ FINANCE_INTENT_PATTERNS = tuple(
         ("spent/paid statement", rf"\bi\s+(?:just\s+)?(?:spent|paid|earned|got\s+paid|received)\b.{{0,40}}{_MONEY_AMOUNT}"),
         ("money transfer request", rf"\b(?:transfer|move)\b.{{0,30}}{_MONEY_AMOUNT}"),
         ("recent transactions request", r"\b(?:my|recent|last|latest)\s+transactions\b"),
+        # v3: household members and children.
+        ("junior isa question", r"\b(?:junior\s+(?:isa|sipp)s?|jisas?)\b"),
+        ("pocket money question", r"\bpocket\s+money\b"),
+        ("household money question",
+         rf"\b(?:household|joint)\b.{{0,30}}{_MONEY_WORDS}|{_ASK}.{{0,30}}\bour\s+(?:finances|savings|"
+         r"money|balances?|accounts|spending|budget|assets|debts?|mortgage)\b"),
+        ("person's money question",
+         rf"{_ASK}.{{0,30}}\b(?:[a-z]+(?:'s|s')|my\s+(?:wife|husband|partner|son|daughter)'s)\s+"
+         r"(?:net\s*worth|savings|isas?|accounts?|pension|money|balances?|debts?|spending|share)\b"),
+        ("joint ownership request",
+         r"\b(?:make|set|mark|change)\b.{0,40}\bjoint(?:ly)?\b|\bjoint(?:ly)?\s+(?:owned|with)\b"
+         r"|\bin\s+(?:both|our|joint)\s+names\b|\bwho\s+owns\b"),
+        ("household member request",
+         r"\b(?:add|remove|archive)\b.{0,40}\b(?:to|from)\s+(?:the|my|our)\s+household\b"
+         r"|\bhousehold\s+members?\b"),
+        ("children's money question",
+         rf"\b(?:{_PEOPLE})(?:'s|s'|')?\b.{{0,20}}{_MONEY_WORDS}(?!.*\b(?:calendar|appointment|note)\b)"),
     )
 )
 
@@ -102,6 +131,10 @@ FINANCE_KEYWORDS = (
     "upcoming payments",
     # v2 stage 4
     "budgets", "left to spend", "overspent", "over budget",
+    # v3: household and children
+    "household", "family", "partner", "joint", "joint account", "my wife", "my husband", "my son",
+    "my daughter", "kids", "children", "junior isa", "junior isas", "jisa", "junior sipp", "pocket money",
+    "household members", "tax year",
 )
 
 

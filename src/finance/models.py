@@ -30,7 +30,8 @@ from sqlalchemy import (
 
 from core.database import Base, TimestampMixin
 
-ACCOUNT_TYPES = ("current", "savings", "credit_card", "cash")
+# v3 adds accounts held for children (a child's savings or current account).
+ACCOUNT_TYPES = ("current", "savings", "credit_card", "cash", "child_savings", "child_current")
 CATEGORY_KINDS = ("income", "expense")
 DIRECTIONS = ("in", "out")
 # Named colours shared with the Notes and Calendar colour pickers; the
@@ -51,7 +52,7 @@ class FinanceAccount(TimestampMixin, Base):
 
     __table_args__ = (
         CheckConstraint(
-            "account_type IN ('current', 'savings', 'credit_card', 'cash')",
+            "account_type IN ('current', 'savings', 'credit_card', 'cash', 'child_savings', 'child_current')",
             name="ck_finance_account_type",
         ),
     )
@@ -290,6 +291,8 @@ class FinanceRecurring(TimestampMixin, Base):
     match_text = Column(String, nullable=False, default="")  # words expected in the bank description
     liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=True)  # loan payment
     asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=True)  # regular contribution
+    # Set for a regular transfer (e.g. pocket money): money moves from account_id to here.
+    to_account_id = Column(String, ForeignKey("finance_accounts.id"), nullable=True)
     archived = Column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
@@ -342,6 +345,64 @@ class FinanceBudget(TimestampMixin, Base):
     )
 
 
+# ── v3: household members and ownership ───────────────────────────────
+
+RELATIONSHIPS = ("me", "partner", "child", "other")
+OWNED_KINDS = ("account", "asset", "liability")
+
+
+class FinanceMember(TimestampMixin, Base):
+    """A person in the household. Tracked profiles only: they don't log in.
+
+    ``owner`` is still the Odysseus user whose data this is. ``linked_user``
+    is reserved for linking a member to their own login later (unused).
+    """
+
+    __tablename__ = "finance_members"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    relationship = Column(String, nullable=False, default="other")
+    date_of_birth = Column(Date, nullable=True)
+    color = Column(String, nullable=False, default="")  # a CATEGORY_COLORS name
+    initials = Column(String, nullable=False, default="")  # blank = from the name
+    is_primary = Column(Boolean, nullable=False, default=False)
+    archived = Column(Boolean, nullable=False, default=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    linked_user = Column(String, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("relationship IN ('me', 'partner', 'child', 'other')",
+                        name="ck_finance_member_relationship"),
+    )
+
+
+class FinanceItemOwner(Base):
+    """One owner of an account, asset or liability. Joint items have several rows."""
+
+    __tablename__ = "finance_item_owners"
+
+    owner = Column(String, nullable=False, index=True)
+    item_kind = Column(String, primary_key=True)
+    item_id = Column(String, primary_key=True)
+    member_id = Column(String, ForeignKey("finance_members.id"), primary_key=True, index=True)
+
+    __table_args__ = (
+        CheckConstraint("item_kind IN ('account', 'asset', 'liability')", name="ck_finance_item_owner_kind"),
+    )
+
+
+class FinanceSetting(Base):
+    """Per-user finance settings (key/value), e.g. the Junior ISA allowance."""
+
+    __tablename__ = "finance_settings"
+
+    owner = Column(String, primary_key=True)
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
+
 class FinanceMeta(Base):
     """Finance schema bookkeeping (key/value), e.g. schema_version."""
 
@@ -374,7 +435,10 @@ V4_TABLES = [
     FinanceRecurringEvent.__table__,
 ]
 V5_TABLES = [FinanceBudget.__table__]
-FINANCE_TABLES = V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + [FinanceMeta.__table__]
+V6_TABLES = [FinanceMember.__table__, FinanceItemOwner.__table__]
+V7_TABLES = [FinanceSetting.__table__]
+FINANCE_TABLES = (V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + V6_TABLES + V7_TABLES
+                  + [FinanceMeta.__table__])
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()
 _ensure_lock = threading.Lock()

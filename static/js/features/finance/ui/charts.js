@@ -196,6 +196,30 @@ export function netWorthChart(container, points) {
   ], (i) => `${monthShort(points[i].month, true)} · as of ${points[i].as_of}`);
 }
 
+/**
+ * Net worth per household member: one line each in the member's colour.
+ * Lines also differ by dash pattern and the tooltip names everyone, so
+ * telling them apart never rests on colour alone.
+ */
+export function membersChart(container, points, members) {
+  if (!points.length || !members.length) return;
+  const series = members.map((member, index) => ({
+    member, index, cls: `fin-member-line${member.color ? ` fin-color-${member.color}` : ''}`,
+    values: points.map((p) => p.by_member?.[member.id] ?? 0),
+  }));
+  const f = frame(container, points, series.flatMap((s) => s.values));
+  const last = points.length - 1;
+  for (const s of series) {
+    const g = el('g', { class: s.cls }, f.svg);
+    const dash = s.index % 4 ? ` fin-chart-dash-${s.index % 4}` : '';
+    el('polyline', { points: s.values.map((v, i) => `${f.cx(i)},${f.y(v)}`).join(' '), class: `fin-chart-line${dash}` }, g);
+    el('circle', { cx: f.cx(last), cy: f.y(s.values[last]), r: 3.5, class: 'fin-chart-dot' }, g);
+  }
+  attachTooltip(container, f, points.length, (i) => series.map((s) => (
+    { label: s.member.display_name, value: s.values[i], key: 'line', cls: s.cls })),
+  (i) => `${monthShort(points[i].month, true)} · as of ${points[i].as_of}`);
+}
+
 /** Income above and spending below zero, per month. */
 export function incomeSpendingChart(container, points) {
   if (!points.length) return;

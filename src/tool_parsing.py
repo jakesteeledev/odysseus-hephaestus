@@ -412,6 +412,8 @@ _TOOL_NAME_MAP = {
     "recurring": "manage_recurring",
     "set_budget": "set_budget",
     "budget": "set_budget",
+    "manage_members": "manage_members",
+    "household_members": "manage_members",
     "manage_bg_jobs": "manage_bg_jobs",
     "bg_jobs": "manage_bg_jobs",
     "background_jobs": "manage_bg_jobs",

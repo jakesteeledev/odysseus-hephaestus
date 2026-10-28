@@ -4,7 +4,7 @@
  * port and notify subscribers after each change.
  */
 
-import { addMonths } from '../domain/money.js';
+import { addMonths, sharePence } from '../domain/money.js';
 
 export function createFinanceState({ api, storage, now }) {
   const today = now();
@@ -15,6 +15,9 @@ export function createFinanceState({ api, storage, now }) {
     networth: null,        // assets - liabilities, grouped by type
     assets: [],            // including archived, with current values
     liabilities: [],
+    members: [],           // household members, primary first, including archived
+    children: null,        // the Children section: each child, Junior ISAs, allowance, pocket money
+    person: storage.person ? storage.person() : '', // whose figures: a member id, or '' for the household
     month: { year: today.getFullYear(), month: today.getMonth() + 1 },
     filters: { accountId: '', categoryId: '', direction: '', q: '' },
     transactions: [],
@@ -38,6 +41,15 @@ export function createFinanceState({ api, storage, now }) {
   const itemById = (kind, id) => (kind === 'asset' ? state.assets : state.liabilities).find((i) => i.id === id) || null;
   const collectionOf = (kind) => (kind === 'asset' ? 'assets' : 'liabilities');
   const categoryById = (id) => state.categories.find((c) => c.id === id) || null;
+  const memberById = (id) => state.members.find((m) => m.id === id) || null;
+  /** The member whose figures are shown, or null for the whole household. */
+  const personMember = () => (state.person ? memberById(state.person) : null);
+  /** The person filter as an API parameter (undefined for the household). */
+  const personParam = () => state.person || undefined;
+  /** True when something with these owners belongs in the current view. */
+  const ownsIt = (ownerIds) => !state.person || (ownerIds || []).includes(state.person);
+  /** The shown person's share of an amount (the whole amount for the household). */
+  const shareOf = (amount, ownerIds) => sharePence(amount, ownerIds, state.person);
 
   /** Default account for new entries: last used if still active, else the first. */
   function defaultAccountId() {
@@ -48,9 +60,17 @@ export function createFinanceState({ api, storage, now }) {
   }
 
   async function loadBase() {
-    const [accounts, categories, networth, assets, liabilities] = await Promise.all([
-      api.accounts(true), api.categories(), api.networth(), api.items('assets', true), api.items('liabilities', true),
+    const members = await api.members(true);
+    state.members = members.members;
+    // A remembered person who has since been deleted falls back to the household.
+    // So does a household of one, where the person switcher is hidden.
+    if (state.person && (!memberById(state.person) || state.members.length < 2)) state.person = '';
+    const hasChildren = state.members.some((m) => m.relationship === 'child');
+    const [accounts, categories, networth, assets, liabilities, children] = await Promise.all([
+      api.accounts(true), api.categories(), api.networth(undefined, personParam()), api.items('assets', true),
+      api.items('liabilities', true), hasChildren ? api.children() : Promise.resolve(null),
     ]);
+    state.children = children;
     state.accounts = accounts.accounts;
     state.totalPence = accounts.total_pence;
     state.categories = categories.categories;
@@ -64,8 +84,8 @@ export function createFinanceState({ api, storage, now }) {
     const f = state.filters;
     const [list, summary] = await Promise.all([
       api.transactions({ year, month, account_id: f.accountId, category_id: f.categoryId,
-        direction: f.direction, q: f.q }),
-      api.summary({ year, month, account_id: f.accountId }),
+        direction: f.direction, q: f.q, person: personParam() }),
+      api.summary({ year, month, account_id: f.accountId, person: personParam() }),
     ]);
     return { list: list.transactions, summary };
   }
@@ -119,6 +139,15 @@ export function createFinanceState({ api, storage, now }) {
     return refreshMonth();
   }
 
+  /** Show one member's figures ('' for the household); remembered on this device. */
+  function setPerson(id) {
+    state.person = id && memberById(id) ? id : '';
+    storage.rememberPerson?.(state.person);
+    // The account filter may point at an account the new person doesn't own.
+    if (state.filters.accountId && !ownsIt(accountById(state.filters.accountId)?.owner_ids)) state.filters.accountId = '';
+    return refresh();
+  }
+
   function setFilters(changes) {
     Object.assign(state.filters, changes);
     return refreshMonth();
@@ -137,6 +166,11 @@ export function createFinanceState({ api, storage, now }) {
     activeAccounts,
     accountById,
     categoryById,
+    memberById,
+    personMember,
+    ownsIt,
+    shareOf,
+    setPerson,
     defaultAccountId,
     refresh,
     refreshMonth,
@@ -158,7 +192,7 @@ export function createFinanceState({ api, storage, now }) {
     addRepayment: (liabilityId, body) => mutate(() => api.addRepayment(liabilityId, body)),
     deleteRepayment: (id) => mutate(() => api.deleteRepayment(id)),
     // Recurring items: confirm/match/undo change transactions, so they reload everything.
-    upcoming: (days) => api.upcoming(days),
+    upcoming: (days) => api.upcoming(days, personParam()),
     listRecurring: () => api.recurring(true).then((r) => r.recurring),
     recurringSuggestions: () => api.recurringSuggestions().then((r) => r.suggestions),
     createRecurring: (body) => mutate(() => api.createRecurring(body)),
@@ -166,14 +200,19 @@ export function createFinanceState({ api, storage, now }) {
     deleteRecurring: (id) => mutate(() => api.deleteRecurring(id)),
     occurrence: (id, action, body) => mutate(() => api.occurrence(id, action, body)),
     makeRecurring: (transactionId, body) => mutate(() => api.makeRecurring(transactionId, body)),
-    budgetStatus: () => api.budgets(state.month.year, state.month.month),
+    budgetStatus: () => api.budgets(state.month.year, state.month.month, personParam()),
     setBudget: (categoryId, body) => api.setBudget(categoryId, body),
-    netWorthHistory: (range) => api.history(range).then((r) => r.points),
-    monthlyTotals: (range, categoryId) => api.monthly(range, categoryId).then((r) => r.points),
+    netWorthHistory: (range) => api.history(range, personParam()).then((r) => r.points),
+    monthlyTotals: (range, categoryId) => api.monthly(range, categoryId, personParam()).then((r) => r.points),
     linkContribution: (transactionId, assetId) => mutate(() => api.linkContribution(transactionId, assetId)),
     itemById,
     createItem: (kind, body) => mutate(() => api.createItem(collectionOf(kind), body)),
     updateItem: (kind, id, body) => mutate(() => api.updateItem(collectionOf(kind), id, body)),
+    saveItem: (kind, id, body, ownerIds) => mutate(async () => {
+      const item = await api.updateItem(collectionOf(kind), id, body);
+      if (ownerIds) await api.setOwners(collectionOf(kind), id, ownerIds);
+      return item;
+    }),
     deleteItem: (kind, id) => mutate(() => api.deleteItem(collectionOf(kind), id)),
     listValuations: (kind, id) => api.valuations(collectionOf(kind), id).then((r) => r.valuations),
     addValuation: (kind, id, body) => mutate(() => api.addValuation(collectionOf(kind), id, body)),
@@ -190,11 +229,22 @@ export function createFinanceState({ api, storage, now }) {
     deleteTransaction: (id) => mutate(() => api.deleteTransaction(id)),
     createAccount: (body) => mutate(() => api.createAccount(body)),
     updateAccount: (id, body) => mutate(() => api.updateAccount(id, body)),
+    /** Save an account's details and, when given, its owners, with one reload. */
+    saveAccount: (id, body, ownerIds) => mutate(async () => {
+      const account = await api.updateAccount(id, body);
+      if (ownerIds) await api.setOwners('accounts', id, ownerIds);
+      return account;
+    }),
     deleteAccount: (id) => mutate(() => api.deleteAccount(id)),
     createCategory: (body) => mutate(() => api.createCategory(body)),
     updateCategory: (id, body) => mutate(() => api.updateCategory(id, body)),
     deleteCategory: (id) => mutate(() => api.deleteCategory(id)),
     categoryUsage: (id) => api.categoryUsage(id),
+    createMember: (body) => mutate(() => api.createMember(body)),
+    updateMember: (id, body) => mutate(() => api.updateMember(id, body)),
+    deleteMember: (id) => mutate(() => api.deleteMember(id)),
+    settings: () => api.settings(),
+    updateSettings: (body) => mutate(() => api.updateSettings(body)),
     commitImport: (body) => mutate(() => api.commitImport(body)),
     undoImport: (id) => mutate(() => api.undoImport(id)),
     // Import helpers, rules and saved mappings change no balances, so they

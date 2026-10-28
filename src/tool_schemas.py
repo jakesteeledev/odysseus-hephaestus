@@ -1579,12 +1579,13 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "query_finances",
-            "description": "Read the user's own money records (GBP): net worth (assets minus liabilities), account balances, assets and liabilities, money in/out and spending by category, and recent transactions. Use for questions like 'what's my net worth', 'how much do I owe', 'what's my pension worth', 'how much did I spend this month'. Read-only.",
+            "description": "Read the user's household money records (GBP): net worth (assets minus liabilities), account balances, assets and liabilities, money in/out and spending by category, recent transactions, and children's accounts and Junior ISAs. Use for questions like 'what's our household net worth', 'what's my net worth', 'what's Sarah's net worth', 'how much do I owe', 'how much is in the kids' junior ISAs'. Read-only.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "view": {"type": "string", "enum": ["overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "budgets", "summary", "transactions"],
-                             "description": "overview (default) = net worth breakdown and this month's totals; net_worth = assets minus liabilities by type; balances = per account; assets = property/investments/pensions/vehicles with values; liabilities = mortgage/loans/student loan/BNPL with balances owed; upcoming = bills and income due soon with projected month-end balances; budgets = each budget's spent, left and committed for a month; summary = money in/out/net and spending by category for a period; transactions = recent entries."},
+                    "view": {"type": "string", "enum": ["overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "budgets", "summary", "transactions", "children"],
+                             "description": "overview (default) = net worth breakdown and this month's totals; net_worth = assets minus liabilities by type; balances = per account; assets = property/investments/pensions/vehicles with values; liabilities = mortgage/loans/student loan/BNPL with balances owed; upcoming = bills and income due soon with projected month-end balances; budgets = each budget's spent, left and committed for a month; summary = money in/out/net and spending by category for a period; transactions = recent entries; children = each child's accounts, Junior ISAs (locked until 18, allowance paid in this tax year) and pocket money."},
+                    "person": {"type": "string", "description": "Whose figures. Omit for the whole household ('our', 'household', 'family'). 'me' when the user says my/mine/I. A member's name (e.g. 'Sarah'), or 'my wife' / 'my son', for that person's share; joint items are split equally. 'kids' for all the children."},
                     "start": {"type": "string", "description": "Period start, YYYY-MM-DD (summary/transactions). Default: first day of this month."},
                     "end": {"type": "string", "description": "Period end, YYYY-MM-DD, inclusive. Default: last day of this month."},
                     "account": {"type": "string", "description": "Optional account name, e.g. 'savings' (partial names are fine)."},
@@ -1690,6 +1691,27 @@ FUNCTION_TOOL_SCHEMAS = [
                     "month": {"type": "string", "description": "Optional YYYY-MM it starts from (default this month)."}
                 },
                 "required": ["category", "amount"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_members",
+            "description": "The user's household for finances: list members (the user, partner, children) with ages; add one; update a name, relationship or date of birth; archive or restore; or set who owns an account, asset or debt (set_owners; joint owners split it equally, and changing an account's owners also moves its past transactions). Ask the user when a name is ambiguous. Not for address-book contacts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "add", "update", "archive", "restore", "set_owners"], "description": "What to do (default list)."},
+                    "name": {"type": "string", "description": "add: the new member's name."},
+                    "member": {"type": "string", "description": "update/archive/restore: which member, e.g. 'Sarah' or 'my son'."},
+                    "new_name": {"type": "string", "description": "update: their new name."},
+                    "relationship": {"type": "string", "enum": ["partner", "child", "other"], "description": "add/update: how they relate to the user."},
+                    "date_of_birth": {"type": "string", "description": "add/update: YYYY-MM-DD (used for children's ages and Junior ISA dates)."},
+                    "item": {"type": "string", "description": "set_owners: the account, asset or debt, e.g. 'joint account' or 'house'."},
+                    "owners": {"type": "array", "items": {"type": "string"}, "description": "set_owners: everyone who owns it, e.g. ['me', 'Sarah']."}
+                },
+                "required": []
             }
         }
     },

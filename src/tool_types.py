@@ -14,6 +14,7 @@ TOOL_TAGS = {
     "bash", "host_shell", "python", "web_search", "web_fetch", "get_weather", "pdf_extract", "youtube_tool", "private_browser", "inspect_media", "extract_text", "transcribe_media", "read_file", "write_file", "edit_file",
     "apply_patch", "todowrite",
     "query_finances", "add_transaction", "add_transfer", "update_valuation", "manage_recurring", "set_budget",  # HEPHAESTUS PATCH: finance
+    "manage_members",  # HEPHAESTUS PATCH: finance v3 household
     "grep", "glob", "ls", "get_workspace", "manage_bg_jobs",
     "create_document", "update_document", "edit_document",
     "search_chats",

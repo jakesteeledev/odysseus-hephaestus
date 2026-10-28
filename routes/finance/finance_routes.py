@@ -19,12 +19,14 @@ from core.database import SessionLocal, engine
 from src.auth_helpers import require_user
 from src.finance import csv_io, imports
 from src.finance import budgets as bud
+from src.finance import children as kids
 from src.finance import insights
 from src.finance import loans
+from src.finance import members as mem
 from src.finance import recurring as rec
 from src.finance import networth as nw
 from src.finance import service as fin
-from src.finance.models import ACCOUNT_TYPES, CATEGORY_COLORS, ensure_tables
+from src.finance.models import ACCOUNT_TYPES, CATEGORY_COLORS, RELATIONSHIPS, ensure_tables
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,7 @@ class AccountCreate(BaseModel):
     name: str
     account_type: str = "current"
     opening_balance: str = "0"
+    owner_ids: Optional[List[str]] = None  # default: the primary member
 
 
 class AccountUpdate(BaseModel):
@@ -127,6 +130,11 @@ class ItemCreate(BaseModel):
     linked_asset_id: Optional[str] = None
     value: Optional[str] = None
     value_date: Optional[str] = None
+    owner_ids: Optional[List[str]] = None  # default: the primary member
+
+
+class OwnersSet(BaseModel):
+    member_ids: List[str]
 
 
 class ItemUpdate(BaseModel):
@@ -192,6 +200,7 @@ class RecurringCreate(BaseModel):
     match_text: str = ""
     liability_id: Optional[str] = None
     asset_id: Optional[str] = None
+    to_account_id: Optional[str] = None  # set for a regular transfer, e.g. pocket money
 
 
 class RecurringUpdate(BaseModel):
@@ -206,6 +215,7 @@ class RecurringUpdate(BaseModel):
     match_text: Optional[str] = None
     liability_id: Optional[str] = None
     asset_id: Optional[str] = None
+    to_account_id: Optional[str] = None  # set for a regular transfer, e.g. pocket money
     archived: Optional[bool] = None
 
 
@@ -216,6 +226,10 @@ class OccurrenceAction(BaseModel):
     transaction_id: Optional[str] = None
 
 
+class SettingsUpdate(BaseModel):
+    junior_isa_limit: Optional[str] = None  # pounds, e.g. "9000"
+
+
 class BudgetSet(BaseModel):
     limit: Optional[str] = None  # empty/null removes the budget from `month`
     month: Optional[str] = None  # YYYY-MM, default this month
@@ -224,6 +238,24 @@ class BudgetSet(BaseModel):
 class MakeRecurring(BaseModel):
     frequency: str = "monthly"
     name: Optional[str] = None
+
+
+class MemberCreate(BaseModel):
+    name: str
+    relationship: str = "other"
+    date_of_birth: Optional[str] = None
+    color: Optional[str] = None
+    initials: str = ""
+
+
+class MemberUpdate(BaseModel):
+    name: Optional[str] = None
+    relationship: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    color: Optional[str] = None
+    initials: Optional[str] = None
+    archived: Optional[bool] = None
+    sort_order: Optional[int] = None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -282,6 +314,21 @@ def _changes(body: BaseModel) -> dict:
     return body.model_dump(exclude_unset=True)
 
 
+def _person(db, owner: str, person: Optional[str]) -> Optional[str]:
+    """``?person=`` -> a member id, or None for the whole household."""
+    member = mem.resolve_person(db, owner, person)
+    return member.id if member else None
+
+
+def _account_out(db, owner: str, account) -> dict:
+    balance = fin.account_balances(db, owner, [account.id])[account.id]
+    owner_ids = mem.owners_of(db, owner, "account", [account.id]).get(account.id, [])
+    return fin.account_to_dict(account, balance, owner_ids)
+
+
+_OWNED_COLLECTIONS = {"accounts": "account", "assets": "asset", "liabilities": "liability"}
+
+
 # ── Routes ──────────────────────────────────────────────────────────────
 
 
@@ -298,17 +345,46 @@ def setup_finance_routes() -> APIRouter:
             "date_formats": list(csv_io.DATE_FORMATS),
             "default_date_format": csv_io.DEFAULT_DATE_FORMAT,
             "max_import_rows": csv_io.MAX_IMPORT_ROWS,
+            "relationships": [r for r in RELATIONSHIPS if r != "me"],
         }
+
+    # Household members
+
+    @router.get("/members")
+    def list_members(request: Request, include_archived: bool = False):
+        owner = _owner(request)
+        with _session() as db:
+            return {"members": mem.list_members(db, owner, include_archived=include_archived)}
+
+    @router.post("/members")
+    def create_member(body: MemberCreate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return mem.member_to_dict(mem.create_member(db, owner, **body.model_dump()), owns=0)
+
+    @router.patch("/members/{member_id}")
+    def update_member(member_id: str, body: MemberUpdate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return mem.member_to_dict(mem.update_member(db, owner, member_id, **_changes(body)))
+
+    @router.delete("/members/{member_id}")
+    def delete_member(member_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            mem.delete_member(db, owner, member_id)
+            return {"ok": True}
 
     # Accounts
 
     @router.get("/accounts")
-    def list_accounts(request: Request, include_archived: bool = False):
+    def list_accounts(request: Request, include_archived: bool = False, person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            accounts = fin.list_accounts(db, owner, include_archived=include_archived)
+            accounts = fin.list_accounts(db, owner, include_archived=include_archived,
+                                         person=_person(db, owner, person))
             active = [a for a in accounts if not a["archived"]]
-            return {"accounts": accounts, "total_pence": sum(a["balance_pence"] for a in active)}
+            return {"accounts": accounts, "total_pence": sum(a["share_pence"] for a in active)}
 
     @router.post("/accounts")
     def create_account(body: AccountCreate, request: Request):
@@ -316,16 +392,25 @@ def setup_finance_routes() -> APIRouter:
         with _session() as db:
             account = fin.create_account(db, owner, name=body.name, account_type=body.account_type,
                                          opening_balance=body.opening_balance)
-            balance = fin.account_balances(db, owner, [account.id])[account.id]
-            return fin.account_to_dict(account, balance)
+            if body.owner_ids:
+                mem.set_owners(db, owner, "account", account.id, body.owner_ids)
+            return _account_out(db, owner, account)
 
     @router.patch("/accounts/{account_id}")
     def update_account(account_id: str, body: AccountUpdate, request: Request):
         owner = _owner(request)
         with _session() as db:
             account = fin.update_account(db, owner, account_id, **_changes(body))
-            balance = fin.account_balances(db, owner, [account.id])[account.id]
-            return fin.account_to_dict(account, balance)
+            return _account_out(db, owner, account)
+
+    @router.put("/{collection}/{item_id}/owners")
+    def set_owners(collection: str, item_id: str, body: OwnersSet, request: Request):
+        kind = _OWNED_COLLECTIONS.get(collection)
+        if kind is None:
+            raise HTTPException(404, "not found")
+        owner = _owner(request)
+        with _session() as db:
+            return {"owner_ids": mem.set_owners(db, owner, kind, item_id, body.member_ids)}
 
     @router.delete("/accounts/{account_id}")
     def delete_account(account_id: str, request: Request):
@@ -382,13 +467,14 @@ def setup_finance_routes() -> APIRouter:
         direction: Optional[str] = None,
         q: str = "",
         limit: Optional[int] = None,
+        person: Optional[str] = None,
     ):
         owner = _owner(request)
         with _session() as db:
             start_d, end_d = _range(year, month, start, end)
             flt = fin.TransactionFilter(start=start_d, end=end_d, account_id=account_id or None,
                                         category_id=category_id or None, direction=direction or None,
-                                        search=q[:100])
+                                        search=q[:100], person=_person(db, owner, person))
             if limit is not None:
                 limit = max(1, min(int(limit), 2000))
             return {"transactions": fin.list_transactions(db, owner, flt, limit=limit)}
@@ -427,11 +513,13 @@ def setup_finance_routes() -> APIRouter:
     # Summary and export
 
     @router.get("/summary")
-    def summary(request: Request, year: int, month: int, account_id: Optional[str] = None):
+    def summary(request: Request, year: int, month: int, account_id: Optional[str] = None,
+                person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
             start, end = fin.month_range(year, month)
-            return fin.summary(db, owner, start=start, end=end, account_id=account_id or None)
+            return fin.summary(db, owner, start=start, end=end, account_id=account_id or None,
+                               person=_person(db, owner, person))
 
     @router.get("/export")
     def export(request: Request, start: Optional[str] = None, end: Optional[str] = None,
@@ -536,42 +624,47 @@ def setup_finance_routes() -> APIRouter:
     # Net worth, assets and liabilities (v2)
 
     @router.get("/networth")
-    def networth(request: Request, as_of: Optional[str] = None):
+    def networth(request: Request, as_of: Optional[str] = None, person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"))
+            return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"), person=_person(db, owner, person))
 
     # Charts (v2 stage 5): specific paths before the generic routes below.
 
     @router.get("/insights/history")
-    def insights_history(request: Request, range: str = "1y"):
+    def insights_history(request: Request, range: str = "1y", person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return insights.net_worth_history(db, owner, range_key=range)
+            return insights.net_worth_history(db, owner, range_key=range, person=_person(db, owner, person))
 
     @router.get("/insights/monthly")
-    def insights_monthly(request: Request, range: str = "1y", category_id: Optional[str] = None):
+    def insights_monthly(request: Request, range: str = "1y", category_id: Optional[str] = None,
+                         person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return insights.monthly_totals(db, owner, range_key=range, category_id=category_id or None)
+            return insights.monthly_totals(db, owner, range_key=range, category_id=category_id or None,
+                                           person=_person(db, owner, person))
 
     @router.get("/insights/spending")
-    def insights_spending(request: Request, start: str, end: str, account_id: Optional[str] = None):
+    def insights_spending(request: Request, start: str, end: str, account_id: Optional[str] = None,
+                          person: Optional[str] = None):
         """Money in/out and spending by category for start..end (both inclusive)."""
         owner = _owner(request)
         with _session() as db:
             start_d, end_d = _range(None, None, start, end)
             if start_d is None or end_d is None or end_d <= start_d:
                 raise fin.FinanceError("choose a start date before the end date")
-            return fin.summary(db, owner, start=start_d, end=end_d, account_id=account_id or None)
+            return fin.summary(db, owner, start=start_d, end=end_d, account_id=account_id or None,
+                               person=_person(db, owner, person))
 
     # Budgets (v2 stage 4): specific paths before the generic routes below.
 
     @router.get("/budgets")
-    def budgets(request: Request, year: Optional[int] = None, month: Optional[int] = None):
+    def budgets(request: Request, year: Optional[int] = None, month: Optional[int] = None,
+                person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return bud.budget_status(db, owner, year=year, month=month)
+            return bud.budget_status(db, owner, year=year, month=month, person=_person(db, owner, person))
 
     @router.put("/budgets/{category_id}")
     def set_budget(category_id: str, body: BudgetSet, request: Request):
@@ -580,13 +673,35 @@ def setup_finance_routes() -> APIRouter:
             row = bud.set_budget(db, owner, category_id, body.limit, month=body.month)
             return {"category_id": row.category_id, "month": row.month.isoformat()[:7], "limit_pence": row.limit_pence}
 
+    # Children and settings (v3): specific paths before the generic routes below.
+
+    @router.get("/children")
+    def children(request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return kids.children_overview(db, owner)
+
+    @router.get("/settings")
+    def get_settings(request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return kids.settings(db, owner)
+
+    @router.patch("/settings")
+    def update_settings(body: SettingsUpdate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            if body.junior_isa_limit is not None:
+                kids.set_setting(db, owner, "junior_isa_limit_pence", body.junior_isa_limit)
+            return kids.settings(db, owner)
+
     # Recurring items (v2 stage 3): specific paths before the generic routes below.
 
     @router.get("/upcoming")
-    def upcoming(request: Request, days: int = 30):
+    def upcoming(request: Request, days: int = 30, person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return rec.upcoming(db, owner, days=days)
+            return rec.upcoming(db, owner, days=days, person=_person(db, owner, person))
 
     @router.get("/recurring")
     def list_recurring(request: Request, include_archived: bool = False):
@@ -716,23 +831,27 @@ def setup_finance_routes() -> APIRouter:
         return "asset" if collection == "assets" else "liability"
 
     @router.get("/{collection}")
-    def list_items(collection: str, request: Request, include_archived: bool = False):
+    def list_items(collection: str, request: Request, include_archived: bool = False, person: Optional[str] = None):
         kind = _kind(collection)
         owner = _owner(request)
         with _session() as db:
-            return {collection: nw.list_items(db, owner, kind, include_archived=include_archived)}
+            return {collection: nw.list_items(db, owner, kind, include_archived=include_archived,
+                                              person=_person(db, owner, person))}
 
     @router.post("/{collection}")
     def create_item(collection: str, body: ItemCreate, request: Request):
         kind = _kind(collection)
         owner = _owner(request)
         data = body.model_dump()
+        owner_ids = data.pop("owner_ids", None)
         if kind == "asset":
             data.pop("lender"); data.pop("linked_asset_id")
         else:
             data.pop("provider")
         with _session() as db:
             item = nw.create_item(db, owner, kind, **data)
+            if owner_ids:
+                mem.set_owners(db, owner, kind, item.id, owner_ids)
             return nw._item_dict(db, owner, kind, item, None)
 
     @router.patch("/{collection}/{item_id}")

@@ -6,6 +6,7 @@
 import { formatPence, isoDay } from '../domain/money.js';
 import { CONTRIBUTION_TYPES, typesFor } from '../domain/items.js';
 import { balanceHtml, emptyHtml, esc, optionsHtml } from './dom.js';
+import { defaultOwnerIds, ownerPickerHtml, sameOwners, wireOwnerPicker } from './ownerChips.js';
 
 export function createItemView({ app, ui, now, loanSection }) {
   /**
@@ -53,6 +54,8 @@ export function createItemView({ app, ui, now, loanSection }) {
               <input id="fin-item-value-date" class="task-form-input" type="date" name="value_date" value="${isoDay(now())}">
             </div>
           </div>` : ''}
+        ${ownerPickerHtml(app, item ? item.owner_ids : defaultOwnerIds(app))}
+        ${item?.owner_warning ? `<div class="fin-warning" role="note">${esc(item.owner_warning)}</div>` : ''}
         <label class="task-form-label" for="fin-item-notes">Notes</label>
         <textarea id="fin-item-notes" class="task-form-input task-form-textarea" name="notes" rows="2" maxlength="2000">${esc(item?.notes || '')}</textarea>
         <div class="fin-form-error" role="alert" hidden></div>
@@ -81,6 +84,7 @@ export function createItemView({ app, ui, now, loanSection }) {
     syncType();
     requestAnimationFrame(() => { if (isNew) form.querySelector('#fin-item-name')?.focus(); });
 
+    const readOwners = wireOwnerPicker(form);
     form.querySelector('[data-action="cancel"]').addEventListener('click', () => onClose());
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -93,13 +97,15 @@ export function createItemView({ app, ui, now, loanSection }) {
       };
       if (kind === 'liability') body.linked_asset_id = typeSel.value === 'mortgage' ? (form.linked_asset_id.value || null) : null;
       if (!body.name) { fail('Give it a name'); return; }
+      const ownerIds = readOwners();
+      if (!ownerIds.length) { fail('Choose at least one owner'); return; }
       try {
         if (isNew) {
           if (form.value.value.trim()) { body.value = form.value.value.trim(); body.value_date = form.value_date.value; }
-          await app.createItem(kind, body);
+          await app.createItem(kind, { ...body, owner_ids: ownerIds });
           ui.showToast(kind === 'asset' ? 'Asset added' : 'Liability added');
         } else {
-          await app.updateItem(kind, item.id, body);
+          await app.saveItem(kind, item.id, body, sameOwners(ownerIds, item.owner_ids) ? null : ownerIds);
           ui.showToast('Saved');
         }
         onClose();

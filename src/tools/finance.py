@@ -25,7 +25,7 @@ from src.tools._common import _parse_tool_args
 logger = logging.getLogger(__name__)
 
 QUERY_VIEWS = ("overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "budgets", "summary",
-               "transactions")
+               "transactions", "children")
 _DEFAULT_TX_LIMIT = 10
 _MAX_TX_LIMIT = 50
 
@@ -128,7 +128,9 @@ def _balances_text(accounts: list[dict]) -> list[str]:
     lines = []
     for account in accounts:
         kind = account["account_type"].replace("_", " ")
-        lines.append(f"- {account['name']} ({kind}): {format_pence(account['balance_pence'])}")
+        share = account.get("share_pence", account["balance_pence"])
+        joint = f" (their share of {format_pence(account['balance_pence'])})" if share != account["balance_pence"] else ""
+        lines.append(f"- {account['name']} ({kind}): {format_pence(share)}{joint}")
     return lines
 
 
@@ -159,7 +161,9 @@ def _transactions_text(rows: list[dict], accounts: dict, categories: dict) -> li
         else:
             what = categories.get(tx["category_id"], fin.UNCATEGORISED)
         desc = tx["description"] or "(no description)"
-        lines.append(f"- {tx['date']} {sign}{format_pence(tx['amount_pence'])} {desc} "
+        amount = tx.get("share_pence", tx["amount_pence"])
+        joint = f" (share of {format_pence(tx['amount_pence'])})" if amount != tx["amount_pence"] else ""
+        lines.append(f"- {tx['date']} {sign}{format_pence(amount)}{joint} {desc} "
                      f"[{accounts.get(tx['account_id'], '?')}, {what}]")
     return lines
 
@@ -178,14 +182,23 @@ async def do_query_finances(content, owner: Optional[str] = None) -> Dict:
             "liability": "liabilities", "debts": "liabilities", "debt": "liabilities", "loans": "liabilities",
             "owe": "liabilities", "mortgage": "liabilities", "bills": "upcoming", "recurring": "upcoming",
             "due": "upcoming", "subscriptions": "upcoming", "scheduled": "upcoming", "budget": "budgets",
-            "left": "budgets"}.get(view, view)
+            "left": "budgets", "kids": "children", "child": "children", "junior_isa": "children",
+            "junior_isas": "children", "jisa": "children", "pocket_money": "children",
+            "household": "overview"}.get(view, view)
     if view not in QUERY_VIEWS:
         return _err(f"view must be one of: {', '.join(QUERY_VIEWS)}")
     try:
         owner = fin.resolve_owner(owner)
         with _session() as db:
-            result = _query(db, owner, view, args)
-            db.commit()  # default categories may have been seeded
+            from src.tools.finance_household import resolve_person
+
+            scope, error = resolve_person(db, owner, _first(args, "person", "member", "who", "whose"))
+            if error:
+                return error
+            if scope.kind == "children" and view in ("overview", "net_worth", "balances", "assets"):
+                view = "children"
+            result = _query(db, owner, view, args, scope)
+            db.commit()  # default categories (and the primary member) may have been seeded
             return result
     except fin.FinanceError as exc:
         return _err(str(exc))
@@ -251,13 +264,32 @@ def _loan_lines(loan: dict) -> list[str]:
     return lines
 
 
-def _query(db, owner: str, view: str, args: dict) -> Dict:
-    from src.finance import networth as nw
+def _share_text(full: int, share: int) -> str:
+    return f" (their share of {format_pence(full)})" if share != full else ""
 
-    overview = fin.accounts_overview(db, owner)
+
+def _query(db, owner: str, view: str, args: dict, scope=None) -> Dict:
+    from src.finance import networth as nw
+    from src.finance.members import list_members
+
+    person = scope.member_id if scope is not None else None
+    overview = fin.accounts_overview(db, owner, person=person)
     accounts = overview["accounts"]
-    data: dict = {"view": view, "currency": "GBP"}
+    data: dict = {"view": view, "currency": "GBP", "person": scope.member if person else None}
     lines: list[str] = []
+    household = len(list_members(db, owner)) > 1
+    if person or household:
+        lines.append(f"Showing: {scope.label() if scope else 'the whole household'}.")
+
+    if view == "children":
+        from src.finance import children as kids
+        from src.tools.finance_household import children_text
+
+        overview_kids = kids.children_overview(db, owner, today=_today())
+        only = person if person and scope.member["relationship"] == "child" else None
+        child_lines, shown = children_text(overview_kids, only)
+        data["children"] = {**overview_kids, "children": shown}
+        return {"response": "\n".join(lines[1:] + child_lines), "data": data, "exit_code": 0}
     has_items = bool(nw.list_items(db, owner, "asset") or nw.list_items(db, owner, "liability"))
     if not accounts and not has_items and view not in ("transactions", "assets", "liabilities"):
         return {"response": "The user has no finance accounts, assets or liabilities yet. They can add them "
@@ -265,15 +297,20 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
                 "data": {"view": view, "accounts": [], "net_worth_pence": 0}, "exit_code": 0}
 
     if view in ("overview", "net_worth"):
-        worth = nw.net_worth(db, owner)
+        worth = nw.net_worth(db, owner, person=person)
         data["net_worth"] = worth
         data["net_worth_pence"] = worth["net_worth_pence"]
         lines += _net_worth_text(worth)
+        if not person and household and worth.get("by_member"):
+            lines.append("By person (each member's share; joint items split equally):")
+            lines += [f"- {row['member']['name']}: {format_pence(row['net_worth_pence'])}"
+                      for row in worth["by_member"]]
 
     if view == "balances":
         data["net_worth_pence"] = overview["total_pence"]
         data["accounts"] = [{"name": a["name"], "type": a["account_type"], "balance_pence": a["balance_pence"],
-                             "balance": format_pence(a["balance_pence"])} for a in accounts]
+                             "balance": format_pence(a["balance_pence"]), "share_pence": a["share_pence"]}
+                            for a in accounts]
         lines.append(f"Total across active accounts: {format_pence(overview['total_pence'])}")
         lines.append("Balances:")
         lines += _balances_text(accounts)
@@ -284,7 +321,7 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
         month = _first(args, "month")
         start = bud.parse_month(month) if month is not None else None
         status = bud.budget_status(db, owner, year=start.year if start else None,
-                                   month=start.month if start else None)
+                                   month=start.month if start else None, person=person)
         rows = status["budgets"]
         if _first(args, "category"):
             match = match_name(args["category"], rows)
@@ -309,6 +346,8 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
                 if r["committed_pence"]:
                     line += (f"; {format_pence(r['committed_pence'])} more expected from recurring items, leaving "
                              f"{format_pence(r['left_after_committed_pence'])}")
+                if person:
+                    line += f"; {scope.member['name']}'s share of the spending {format_pence(r['person_spent_pence'])}"
                 lines.append(f"{line} ({state})")
             if not _first(args, "category") and status["unbudgeted_spent_pence"]:
                 lines.append(f"Spending in categories without a budget: {format_pence(status['unbudgeted_spent_pence'])}")
@@ -320,7 +359,7 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
             days = int(_first(args, "days", default=30))
         except (TypeError, ValueError):
             days = 30
-        up = rec.upcoming(db, owner, days=max(1, min(days, 366)))
+        up = rec.upcoming(db, owner, days=max(1, min(days, 366)), person=person)
         data["upcoming"] = up
         names = {a["id"]: a["name"] for a in fin.list_accounts(db, owner, include_archived=True)}
         rows = [r for r in up["items"] if r["status"] in ("overdue", "expected")]
@@ -329,22 +368,31 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
         else:
             lines.append(f"Expected recurring items up to {up['until']} (not yet confirmed):")
             for r in rows:
-                sign = "+" if r["direction"] == "in" else "-"
+                direction = r.get("share_direction") or r["direction"]
+                sign = "+" if direction == "in" else "-"
                 extra = " OVERDUE" if r["status"] == "overdue" else ""
                 if r["matches"]:
                     extra += " (a matching transaction is already recorded; confirm to match it)"
-                lines.append(f"- {r['due_date']} {r['name']} {sign}{format_pence(r['amount_pence'])} "
-                             f"[{names.get(r['account_id'], '?')}, {r['frequency_label'].lower()}]{extra}")
-            total_out = sum(r["amount_pence"] for r in rows if r["direction"] == "out")
+                where = names.get(r["account_id"], "?")
+                if r.get("to_account_id"):
+                    where = f"transfer {where} to {names.get(r['to_account_id'], '?')}"
+                lines.append(f"- {r['due_date']} {r['name']} {sign}{format_pence(r['share_pence'])}"
+                             f"{_share_text(r['amount_pence'], r['share_pence']) if not r.get('to_account_id') else ''} "
+                             f"[{where}, {r['frequency_label'].lower()}]{extra}")
+            total_out = sum(r["share_pence"] for r in rows
+                            if (r.get("share_direction") or r["direction"]) == "out" and not r.get("to_account_id"))
             lines.append(f"Total going out: {format_pence(total_out)}")
         if up["projected_balances"]:
             lines.append(f"Projected balances at {up['month_end']} (after expected items this month):")
-            lines += [f"- {p['name']}: {format_pence(p['projected_pence'])} (now {format_pence(p['balance_pence'])})"
-                      for p in up["projected_balances"]]
+            for p in up["projected_balances"]:
+                line = f"- {p['name']}: {format_pence(p['projected_pence'])} (now {format_pence(p['balance_pence'])})"
+                if person and p["projected_share_pence"] != p["projected_pence"]:
+                    line += f"; {scope.member['name']}'s share {format_pence(p['projected_share_pence'])}"
+                lines.append(line)
 
     if view in ("assets", "liabilities"):
         kind = "asset" if view == "assets" else "liability"
-        items = nw.list_items(db, owner, kind)
+        items = nw.list_items(db, owner, kind, person=person)
         if _first(args, "name"):
             match = match_name(args["name"], items)
             if not match.ok:
@@ -362,9 +410,11 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
             lines.append(f"No {view} recorded yet.")
         else:
             label = "Assets" if kind == "asset" else "Liabilities (owed)"
-            lines.append(f"{label}: {format_pence(sum(i['value_pence'] for i in items))}")
+            lines.append(f"{label}: {format_pence(sum(i['share_pence'] for i in items))}")
             for i in items:
-                lines.append(f"- {_item_line(i)} [{i['type'].replace('_', ' ')}]")
+                share = _share_text(i["value_pence"], i["share_pence"])
+                shown = {**i, "value_pence": i["share_pence"]} if share else i
+                lines.append(f"- {_item_line(shown)}{share} [{i['type'].replace('_', ' ')}]")
                 if i.get("loan"):
                     lines += [f"  {line}" for line in _loan_lines(i["loan"])]
         if kind == "liability":
@@ -381,15 +431,20 @@ def _query(db, owner: str, view: str, args: dict) -> Dict:
                 return {**error, "error": error["error"].replace("Nothing saved. ", "")}
             account_id = account["id"]
         start, end = _range(args)
-        s = fin.summary(db, owner, start=start, end=end + timedelta(days=1), account_id=account_id)
+        s = fin.summary(db, owner, start=start, end=end + timedelta(days=1), account_id=account_id, person=person)
         data["summary"] = {k: s[k] for k in ("total_in_pence", "total_out_pence", "net_pence",
-                                             "spend_by_category", "income_by_category")}
+                                             "spend_by_category", "income_by_category", "moved_in_pence",
+                                             "moved_out_pence")}
         data["period"] = {"start": start.isoformat(), "end": end.isoformat()}
         lines.append(f"Period {_period_label(start, end)}" + (f" ({account['name']})" if account_id else "") + ":")
         lines += _summary_text(s)
+        if s["moved_in_pence"] or s["moved_out_pence"]:
+            lines.append(f"Moved between members by transfers: {format_pence(s['moved_in_pence'])} in, "
+                         f"{format_pence(s['moved_out_pence'])} out (not income or spending).")
 
     if view == "transactions":
-        flt = fin.TransactionFilter(search=str(_first(args, "search", "query", "q", default=""))[:100])
+        flt = fin.TransactionFilter(search=str(_first(args, "search", "query", "q", default=""))[:100],
+                                    person=person)
         if _first(args, "start", "start_date", "from", "end", "end_date", "to"):
             start, end = _range(args)
             flt.start, flt.end = start, end + timedelta(days=1)

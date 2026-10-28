@@ -58,7 +58,7 @@ export function createFinanceApi({ request }) {
     saveMapping: (body) => call('POST', '/mappings', body),
     deleteMapping: (id) => call('DELETE', `/mappings/${encodeURIComponent(id)}`),
     // v2: net worth, assets and liabilities. `collection` is 'assets' or 'liabilities'.
-    networth: (asOf) => call('GET', `/networth${qs({ as_of: asOf })}`),
+    networth: (asOf, person) => call('GET', `/networth${qs({ as_of: asOf, person })}`),
     items: (collection, includeArchived = false) => call('GET', `/${collection}${qs({ include_archived: includeArchived || undefined })}`),
     createItem: (collection, body) => call('POST', `/${collection}`, body),
     updateItem: (collection, id, body) => call('PATCH', `/${collection}/${encodeURIComponent(id)}`, body),
@@ -79,7 +79,7 @@ export function createFinanceApi({ request }) {
     deleteRepayment: (id) => call('DELETE', `/repayments/${encodeURIComponent(id)}`),
     linkPayment: (transactionId, liabilityId) => call('PUT', `/transactions/${encodeURIComponent(transactionId)}/payment`, { liability_id: liabilityId || null }),
     // v2 stage 3: recurring items.
-    upcoming: (days = 30) => call('GET', `/upcoming${qs({ days })}`),
+    upcoming: (days = 30, person) => call('GET', `/upcoming${qs({ days, person })}`),
     recurring: (includeArchived = false) => call('GET', `/recurring${qs({ include_archived: includeArchived || undefined })}`),
     recurringSuggestions: () => call('GET', '/recurring/suggestions'),
     createRecurring: (body) => call('POST', '/recurring', body),
@@ -88,10 +88,21 @@ export function createFinanceApi({ request }) {
     occurrence: (id, action, body) => call('POST', `/recurring/${encodeURIComponent(id)}/${action}`, body),
     makeRecurring: (transactionId, body) => call('POST', `/transactions/${encodeURIComponent(transactionId)}/make-recurring`, body),
     // v2 stage 4: budgets.
-    budgets: (year, month) => call('GET', `/budgets${qs({ year, month })}`),
+    budgets: (year, month, person) => call('GET', `/budgets${qs({ year, month, person })}`),
     setBudget: (categoryId, body) => call('PUT', `/budgets/${encodeURIComponent(categoryId)}`, body),
     // v2 stage 5: chart data.
-    history: (range) => call('GET', `/insights/history${qs({ range })}`),
-    monthly: (range, categoryId) => call('GET', `/insights/monthly${qs({ range, category_id: categoryId })}`),
+    history: (range, person) => call('GET', `/insights/history${qs({ range, person })}`),
+    monthly: (range, categoryId, person) => call('GET', `/insights/monthly${qs({ range, category_id: categoryId, person })}`),
+    // v3: household members.
+    members: (includeArchived = false) => call('GET', `/members${qs({ include_archived: includeArchived || undefined })}`),
+    createMember: (body) => call('POST', '/members', body),
+    updateMember: (id, body) => call('PATCH', `/members/${encodeURIComponent(id)}`, body),
+    deleteMember: (id) => call('DELETE', `/members/${encodeURIComponent(id)}`),
+    // v3 step 4: children and settings.
+    children: () => call('GET', '/children'),
+    settings: () => call('GET', '/settings'),
+    updateSettings: (body) => call('PATCH', '/settings', body),
+    // `collection` is 'accounts', 'assets' or 'liabilities'.
+    setOwners: (collection, id, memberIds) => call('PUT', `/${collection}/${encodeURIComponent(id)}/owners`, { member_ids: memberIds }),
   };
 }
