@@ -17,6 +17,7 @@ runs idempotent ``_migrate_*`` helpers), so finance keeps its own small one:
   constraint, so ``finance_accounts`` is rebuilt to allow the child account
   types. Every row is copied unchanged, inside one transaction that rolls
   back unless the row count matches and every foreign key still resolves.
+- Step 8 adds the projection assumption and scenario tables.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from core.database import Base
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 def _create(bind, tables) -> None:
@@ -167,7 +168,14 @@ def _step_7(bind) -> None:
         _rebuild_accounts_table(bind)
 
 
-STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4, 5: _step_5, 6: _step_6, 7: _step_7}
+def _step_8(bind) -> None:
+    """Projections: assumption and scenario tables (new tables only)."""
+    from src.finance.models import V8_TABLES
+
+    _create(bind, V8_TABLES)
+
+
+STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4, 5: _step_5, 6: _step_6, 7: _step_7, 8: _step_8}
 
 
 def _current_version(bind) -> int:

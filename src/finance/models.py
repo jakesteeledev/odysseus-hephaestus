@@ -403,6 +403,35 @@ class FinanceSetting(Base):
     value = Column(String, nullable=False)
 
 
+# ── Projections: assumptions and saved scenarios ───────────────────────
+
+
+class FinanceProjectionSetting(Base):
+    """One projection assumption (key/value), e.g. ``growth:property`` = 150 (bp).
+
+    Keys are listed in ``src.finance.projections.ASSUMPTION_KEYS``; an asset
+    override is ``growth_asset:<asset id>``.
+    """
+
+    __tablename__ = "finance_projection_settings"
+
+    owner = Column(String, primary_key=True)
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
+
+class FinanceProjectionScenario(TimestampMixin, Base):
+    """A named what-if: a list of changes applied on top of the base projection."""
+
+    __tablename__ = "finance_projection_scenarios"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    changes_json = Column(Text, nullable=False, default="[]")
+    notes = Column(Text, nullable=False, default="")
+
+
 class FinanceMeta(Base):
     """Finance schema bookkeeping (key/value), e.g. schema_version."""
 
@@ -437,8 +466,9 @@ V4_TABLES = [
 V5_TABLES = [FinanceBudget.__table__]
 V6_TABLES = [FinanceMember.__table__, FinanceItemOwner.__table__]
 V7_TABLES = [FinanceSetting.__table__]
+V8_TABLES = [FinanceProjectionSetting.__table__, FinanceProjectionScenario.__table__]
 FINANCE_TABLES = (V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + V6_TABLES + V7_TABLES
-                  + [FinanceMeta.__table__])
+                  + V8_TABLES + [FinanceMeta.__table__])
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()
 _ensure_lock = threading.Lock()

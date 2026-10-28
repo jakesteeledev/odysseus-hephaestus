@@ -338,6 +338,26 @@ def monthly_payment_for(schedule: FinanceLoanSchedule) -> Optional[int]:
     return None
 
 
+def payment_step(balance: int, monthly_rate: float, payment: int, *, final: bool = False) -> tuple[int, int, int]:
+    """One scheduled monthly payment: (interest charged, amount paid, balance after).
+
+    Interest is a whole month at APR / 12. The last payment (by term end,
+    which includes any balloon, or when the balance is smaller than the
+    payment) clears everything. Shared by :func:`project` and the
+    multi-year projection engine so both use the same maths.
+    """
+    interest = int(round(balance * monthly_rate))
+    if final or balance + interest <= payment:
+        return interest, balance + interest, 0
+    return interest, payment, balance + interest - payment
+
+
+def term_end_date(schedule: FinanceLoanSchedule) -> Optional[date]:
+    if not schedule.term_months:
+        return None
+    return add_months(schedule.start_date, schedule.term_months, schedule.payment_day)
+
+
 def project(schedule: FinanceLoanSchedule, current_balance: int, from_date: date) -> dict:
     """Remaining payments, payoff date and interest still to pay from `from_date`."""
     payment = monthly_payment_for(schedule)
@@ -350,20 +370,18 @@ def project(schedule: FinanceLoanSchedule, current_balance: int, from_date: date
         out["pays_off"] = None  # unknown without a payment or term
         return out
     r = schedule.apr_bp / 10000 / 12
-    term_end = add_months(schedule.start_date, schedule.term_months, schedule.payment_day) if schedule.term_months else None
+    term_end = term_end_date(schedule)
     due = next_payment_date(from_date, schedule.payment_day)
     out["next_payment_date"] = due.isoformat()
     bal = current_balance
     total_interest = 0
     for count in range(1, MAX_PROJECTION_MONTHS + 1):
-        interest = int(round(bal * r))
+        interest, paid, bal = payment_step(bal, r, payment, final=term_end is not None and due >= term_end)
         total_interest += interest
-        final_by_term = term_end is not None and due >= term_end
-        if final_by_term or bal + interest <= payment:
+        if bal == 0:
             out.update(remaining_payments=count, payoff_date=due.isoformat(),
-                       interest_remaining_pence=total_interest, final_payment_pence=bal + interest)
+                       interest_remaining_pence=total_interest, final_payment_pence=paid)
             return out
-        bal = bal + interest - payment
         due = add_months(due, 1, schedule.payment_day)
     out.update(pays_off=False, interest_remaining_pence=None)
     return out
