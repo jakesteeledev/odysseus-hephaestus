@@ -104,21 +104,22 @@ def test_exact_name_beats_partial_matches():
 # ── query_finances ──────────────────────────────────────────────────────
 
 
-def test_net_worth_is_total_of_active_accounts(seeded):
+def test_net_worth_is_assets_minus_liabilities(seeded):
     result = run(tools.do_query_finances, {"view": "net_worth"})
     assert result["exit_code"] == 0
-    # current 1000+2500-45.20-80-300, savings 5000+300, card -250-9.99; archived cash excluded.
-    expected = (100000 + 250000 - 4520 - 8000 - 30000) + (500000 + 30000) + (-25000 - 999)
+    # current 1000+2500-45.20-80-300, savings 5000+300, card -250-9.99 (a liability),
+    # plus the archived cash account, which still holds £40 (archived counts until zero).
+    expected = (100000 + 250000 - 4520 - 8000 - 30000) + (500000 + 30000) + 4000 - (25000 + 999)
     assert result["data"]["net_worth_pence"] == expected
-    assert "Net worth (all active accounts): £8,114.81" in result["response"]
-    assert "Old Cash" not in result["response"]
+    assert "Net worth: £8,154.81" in result["response"]
+    assert "Credit cards: £259.99" in result["response"] and "Old Cash: £40.00 (archived)" in result["response"]
 
 
 def test_overview_with_no_arguments_answers_net_worth_and_month(seeded):
     result = asyncio.run(tools.do_query_finances("", owner=OWNER))
     assert result["exit_code"] == 0
     text = result["response"]
-    assert "Net worth" in text and "Monzo Current (current): £3,074.80" in text
+    assert "Net worth" in text and "Monzo Current: £3,074.80" in text
     assert "Period 2026-10-01 to 2026-10-31" in text
     assert "Money in: £2,500.00" in text and "Money out: £55.19" in text
 
@@ -168,7 +169,7 @@ def test_query_with_ambiguous_account_lists_options(seeded, db_factory):
 
 def test_query_with_no_accounts(db_factory):
     result = run(tools.do_query_finances, {"view": "net_worth"})
-    assert result["exit_code"] == 0 and "no finance accounts yet" in result["response"]
+    assert result["exit_code"] == 0 and "no finance accounts" in result["response"]
 
 
 def test_bad_view_is_rejected(seeded):
@@ -177,7 +178,7 @@ def test_bad_view_is_rejected(seeded):
 
 def test_users_only_see_their_own_finances(seeded):
     result = run(tools.do_query_finances, {"view": "net_worth"}, owner="bob")
-    assert "no finance accounts yet" in result["response"]
+    assert "no finance accounts" in result["response"]
 
 
 def test_internal_callers_are_refused(seeded):
@@ -275,3 +276,253 @@ def test_add_transfer_needs_two_distinct_known_accounts(seeded):
     assert same["exit_code"] == 1 and "two different accounts" in same["error"]
     unknown = run(tools.do_add_transfer, {"from_account": "monzo", "to_account": "isa", "amount": 5})
     assert unknown["exit_code"] == 1 and "No account called 'isa'" in unknown["error"]
+
+
+# ── v2: assets, liabilities and update_valuation ───────────────────────
+
+
+@pytest.fixture
+def items(seeded, db_factory):
+    from src.finance import networth as nw
+
+    db = db_factory()
+    house = nw.create_item(db, OWNER, "asset", name="Home", asset_type="property", value="300000",
+                           value_date="2026-01-01")
+    nw.create_item(db, OWNER, "asset", name="Vanguard ISA", asset_type="investment", value="12000",
+                   value_date="2026-09-30")
+    nw.create_item(db, OWNER, "asset", name="Aviva pension", asset_type="pension", value="45000")
+    nw.create_item(db, OWNER, "liability", name="Home mortgage", liability_type="mortgage", value="180000",
+                   linked_asset_id=house.id, value_date="2026-01-01")
+    nw.create_item(db, OWNER, "liability", name="Car finance", liability_type="loan", subtype="pcp",
+                   value="8000", value_date="2026-09-01")
+    db.commit()
+    db.close()
+
+
+def test_net_worth_breakdown_includes_assets_and_liabilities(items):
+    result = run(tools.do_query_finances, {"view": "net_worth"})
+    text = result["response"]
+    worth = result["data"]["net_worth"]
+    assert worth["assets_total_pence"] == 841480 + 30000000 + 1200000 + 4500000
+    assert worth["liabilities_total_pence"] == 25999 + 18000000 + 800000
+    assert "- Property: £300,000.00" in text and "equity £120,000.00" in text
+    assert "- Mortgages: £180,000.00" in text and "Car finance: £8,000.00 (as of 2026-09-01)" in text
+
+
+def test_assets_and_liabilities_views(items):
+    assets = run(tools.do_query_finances, {"view": "assets"})
+    assert {i["name"] for i in assets["data"]["assets"]} == {"Home", "Vanguard ISA", "Aviva pension"}
+    debts = run(tools.do_query_finances, {"view": "debts"})
+    assert debts["data"]["view"] == "liabilities"
+    assert "Liabilities (owed): £188,000.00" in debts["response"]
+    assert "Credit cards (owed): Amex £259.99" in debts["response"]
+
+
+def test_update_valuation_by_fuzzy_name(items):
+    result = run(tools.do_update_valuation, {"name": "isa", "value": "12,500"})
+    assert result["exit_code"] == 0, result
+    assert result["response"].startswith("Updated Vanguard ISA value to £12,500.00 on 2026-10-27 "
+                                         "(was £12,000.00 on 2026-09-30)")
+    debt = run(tools.do_update_valuation, {"name": "car", "value": "7650", "note": "statement"})
+    assert debt["exit_code"] == 0 and "Car finance balance owed to £7,650.00" in debt["response"]
+
+
+def test_update_valuation_ambiguous_and_unknown(items, db_factory):
+    from src.finance import networth as nw
+
+    exact = run(tools.do_update_valuation, {"name": "home", "value": "1"})
+    # "Home" matches the asset exactly, so it wins over "Home mortgage".
+    assert exact["exit_code"] == 0 and "Updated Home value" in exact["response"]
+    db = db_factory()
+    nw.create_item(db, OWNER, "asset", name="Vanguard SIPP", asset_type="pension")
+    db.commit()
+    db.close()
+    both = run(tools.do_update_valuation, {"name": "vanguard", "value": "1"})
+    assert both["exit_code"] == 1 and "matches more than one item" in both["error"]
+    assert "Vanguard ISA (asset)" in both["error"] and "Vanguard SIPP (asset)" in both["error"]
+    missing = run(tools.do_update_valuation, {"name": "boat", "value": "1"})
+    assert missing["exit_code"] == 1 and "No asset or liability called 'boat'" in missing["error"]
+    assert "Do not create one" in missing["error"]
+
+
+def test_update_valuation_refuses_accounts_and_needs_a_value(items):
+    account = run(tools.do_update_valuation, {"name": "Monzo Current", "value": "5"})
+    assert account["exit_code"] == 1 and "is an account" in account["error"]
+    assert "What is the new value" in run(tools.do_update_valuation, {"name": "isa"})["error"]
+    assert run(tools.do_update_valuation, {"name": "isa", "value": "abc"})["exit_code"] == 1
+
+
+def test_update_valuation_with_no_items(db_factory):
+    result = run(tools.do_update_valuation, {"name": "pension", "value": "5"})
+    assert result["exit_code"] == 1 and "no assets or liabilities yet" in result["error"]
+
+
+# ── v2 stage 2: loans in tools ─────────────────────────────────────────
+
+
+@pytest.fixture
+def car_loan(seeded, db_factory):
+    from src.finance import loans
+    from src.finance import networth as nw
+
+    db = db_factory()
+    car = nw.create_item(db, OWNER, "liability", name="Car finance", liability_type="loan", subtype="pcp")
+    loans.set_schedule(db, OWNER, car.id, start_date="2026-01-01", start_balance="12000", apr="0",
+                       term_months=24, payment_day=1)
+    loans.add_repayment(db, OWNER, car.id, amount="500", on="2026-02-01")
+    slc = nw.create_item(db, OWNER, "liability", name="Student loan", liability_type="student_loan")
+    nw.set_valuation(db, OWNER, "liability", slc.id, value="28000", on="2026-04-01")
+    ids = {"car": car.id, "slc": slc.id}
+    db.commit()
+    db.close()
+    return ids
+
+
+def test_liabilities_view_has_loan_details(car_loan, monkeypatch):
+    from src.finance import loans
+
+    monkeypatch.setattr(loans, "_today_for_owner", lambda: TODAY)
+    result = run(tools.do_query_finances, {"view": "liabilities", "name": "car"})
+    assert result["exit_code"] == 0
+    text = result["response"]
+    assert "Car finance: £11,500.00" in text and "Student loan" not in text
+    assert "Next payment £500.00" in text and "interest still to pay £0.00" in text
+    assert "Missed expected payment(s): 2026-10-01, 2026-09-01" in text
+    everything = run(tools.do_query_finances, {"view": "liabilities"})
+    assert "Student loan: £28,000.00" in everything["response"]
+
+
+def test_add_transaction_towards_a_debt(car_loan, db_factory):
+    from src.finance import loans
+    from src.finance.models import FinanceLiability
+
+    result = run(tools.do_add_transaction, {"amount": "500", "account": "monzo", "towards": "car",
+                                            "description": "Car finance"})
+    assert result["exit_code"] == 0, result
+    assert "Counted as a payment towards Car finance; still owed £11,000.00" in result["response"]
+    db = db_factory()
+    car = db.query(FinanceLiability).filter_by(id=car_loan["car"]).one()
+    assert loans.balance(db, OWNER, car)[0] == 1100000
+    db.close()
+
+
+def test_add_transaction_towards_unknown_or_income_saves_nothing(car_loan, db_factory):
+    unknown = run(tools.do_add_transaction, {"amount": "5", "account": "monzo", "towards": "mortgage"})
+    assert unknown["exit_code"] == 1 and "No debt called 'mortgage'" in unknown["error"]
+    income = run(tools.do_add_transaction, {"amount": "5", "account": "monzo", "direction": "in", "towards": "car"})
+    assert income["exit_code"] == 1 and "Only money going out" in income["error"]
+    db = db_factory()
+    assert not fin.list_transactions(db, OWNER, fin.TransactionFilter(start=TODAY))
+    db.close()
+
+
+# ── v2 stage 3: recurring items in tools ───────────────────────────────
+
+
+@pytest.fixture
+def bills(seeded, db_factory, monkeypatch):
+    from src.finance import recurring as rec
+
+    monkeypatch.setattr(rec, "_today_for_owner", lambda: TODAY)
+    monkeypatch.setattr(fin, "_today_for_owner", lambda: TODAY)
+    db = db_factory()
+    netflix = rec.create_recurring(db, OWNER, name="Netflix", account_id=seeded["current"], amount="10.99",
+                                   next_due="2026-10-29")
+    rec.create_recurring(db, OWNER, name="Rent", account_id=seeded["current"], amount="900", next_due="2026-11-01")
+    rec.create_recurring(db, OWNER, name="Council tax", account_id=seeded["current"], amount="150",
+                         next_due="2026-10-20")
+    ids = {"netflix": netflix.id}
+    db.commit()
+    db.close()
+    return ids
+
+
+def test_upcoming_view(bills):
+    week = run(tools.do_query_finances, {"view": "upcoming", "days": 7})
+    text = week["response"]
+    assert "- 2026-10-20 Council tax -£150.00 [Monzo Current, monthly] OVERDUE" in text
+    assert "- 2026-10-29 Netflix -£10.99" in text and "- 2026-11-01 Rent -£900.00" in text
+    assert "Total going out: £1,060.99" in text
+    # Month-end projection only counts items due by 31 October.
+    assert "Monzo Current: £2,913.81 (now £3,074.80)" in text
+    assert run(tools.do_query_finances, {"view": "bills"})["data"]["view"] == "upcoming"
+
+
+def test_manage_recurring_add_list_skip(bills):
+    added = run(tools.do_manage_recurring, {"action": "add", "name": "Gym", "amount": "35", "account": "monzo",
+                                            "frequency": "monthly", "next_due": "2026-11-05", "category": "health"})
+    assert added["exit_code"] == 0 and "Gym: -£35.00 monthly from Monzo Current, next due 2026-11-05" in added["response"]
+    listed = run(tools.do_manage_recurring, {"action": "list"})
+    assert "- Gym: -£35.00 monthly" in listed["response"]
+    skipped = run(tools.do_manage_recurring, {"action": "skip", "name": "council"})
+    assert skipped["exit_code"] == 0 and "Skipped Council tax due 2026-10-20" in skipped["response"]
+
+
+def test_manage_recurring_confirm_creates_or_matches(bills, db_factory):
+    created = run(tools.do_manage_recurring, {"action": "confirm", "name": "council tax"})
+    assert created["exit_code"] == 0 and "recorded £150.00 on Monzo Current" in created["response"]
+    from src.finance.models import FinanceAccount
+
+    db = db_factory()
+    current = db.query(FinanceAccount).filter_by(name="Monzo Current").one()
+    fin.create_transaction(db, OWNER, account_id=current.id, date="2026-10-29", amount="10.99",
+                           direction="out", description="NETFLIX.COM")
+    db.commit()
+    db.close()
+    matched = run(tools.do_manage_recurring, {"action": "confirm", "name": "netflix"})
+    assert matched["exit_code"] == 0 and "by matching the transaction already recorded on 2026-10-29" in matched["response"]
+    assert "No new transaction was added" in matched["response"]
+
+
+def test_manage_recurring_asks_when_unclear(bills):
+    missing = run(tools.do_manage_recurring, {"action": "confirm", "name": "spotify"})
+    assert missing["exit_code"] == 1 and "doesn't match any recurring item" in missing["error"]
+    noname = run(tools.do_manage_recurring, {"action": "skip"})
+    assert noname["exit_code"] == 1 and "Which recurring item?" in noname["error"]
+    incomplete = run(tools.do_manage_recurring, {"action": "add", "name": "Gym"})
+    assert incomplete["exit_code"] == 1 and "needs a name and an amount" in incomplete["error"]
+    assert run(tools.do_manage_recurring, {"action": "explode"})["exit_code"] == 1
+
+
+# ── v2 stage 4: budgets in tools ───────────────────────────────────────
+
+
+@pytest.fixture
+def budgets(seeded, db_factory, monkeypatch):
+    from src.finance import budgets as bud
+    from src.finance import recurring as rec
+
+    for module in (bud, rec, fin):
+        monkeypatch.setattr(module, "_today_for_owner", lambda: TODAY)
+    db = db_factory()
+    bud.set_budget(db, OWNER, seeded["cats"]["Groceries"], "300")
+    bud.set_budget(db, OWNER, seeded["cats"]["Subscriptions"], "15")
+    rec.create_recurring(db, OWNER, name="Spotify", account_id=seeded["current"], amount="11.99",
+                         next_due="2026-10-30", category_id=seeded["cats"]["Subscriptions"])
+    db.commit()
+    db.close()
+
+
+def test_budgets_view(budgets):
+    result = run(tools.do_query_finances, {"view": "budgets"})
+    text = result["response"]
+    assert "Budgets for 2026-10:" in text
+    assert "- Groceries: spent £45.20 of £300.00, £254.80 left (on track)" in text
+    assert ("- Subscriptions: spent £9.99 of £15.00, £5.01 left; £11.99 more expected from recurring items, "
+            "leaving -£6.98 (close to the limit)") in text
+    one = run(tools.do_query_finances, {"view": "budgets", "category": "groceries"})
+    assert "Subscriptions" not in one["response"]
+    none = run(tools.do_query_finances, {"view": "budgets", "category": "eating out"})
+    assert none["exit_code"] == 1 and "no budget for 'eating out'" in none["error"]
+
+
+def test_set_budget(budgets):
+    result = run(tools.do_set_budget, {"category": "eating out", "amount": "120"})
+    assert result["exit_code"] == 0
+    assert result["response"] == "Eating out budget set to £120.00 a month from 2026-10 onwards (no rollover)."
+    removed = run(tools.do_set_budget, {"category": "groceries", "amount": "none", "month": "2026-11"})
+    assert removed["response"] == "Removed the Groceries budget from 2026-11 onwards."
+    assert run(tools.do_set_budget, {"category": "salary", "amount": "5"})["exit_code"] == 1  # income category
+    missing = run(tools.do_set_budget, {"category": "pets", "amount": "5"})
+    assert missing["exit_code"] == 1 and "Do not create a category" in missing["error"]
+    assert "What should the monthly budget be" in run(tools.do_set_budget, {"category": "health"})["error"]

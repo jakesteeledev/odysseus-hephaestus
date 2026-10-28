@@ -20,6 +20,27 @@ FINANCE_REQUESTS = [
     "show me my recent transactions",
     "I spent £4 on coffee",
     "add £5 coffee today",
+    # v2
+    "how much do I owe on my car?",
+    "what's my pension worth",
+    "update my ISA to £12,500",
+    "my house is now worth £310,000",
+    "show me my liabilities",
+    "how much is left on my mortgage",
+    "what's my student loan balance",
+    "list my investments",
+    # v2 stage 3
+    "what bills are due this week?",
+    "what's coming out of my account this month",
+    "list my subscriptions",
+    "skip netflix this month",
+    "what direct debits do I have",
+    "add a monthly payment of £10.99 for Netflix",
+    # v2 stage 4
+    "how much is left in my groceries budget?",
+    "how much have I got left for eating out",
+    "am I over budget this month?",
+    "set my groceries budget to £300",
 ]
 
 OTHER_REQUESTS = {
@@ -27,6 +48,7 @@ OTHER_REQUESTS = {
     "add a note to buy milk": "notes",
     "add lunch with Sam to my calendar tomorrow": "calendar",
     "remind me to pay rent tomorrow": "notes",
+    "show me the email about my pension": "email",
 }
 
 
@@ -53,13 +75,16 @@ def test_other_requests_keep_their_own_tools(request_text, family):
 
 @pytest.mark.parametrize("request_text", [
     "what's the token budget setting", "how do I configure load balancing", "what is a credit score?",
+    "set the CSS property to 10px", "what is a mortgage?", "what tasks are due tomorrow",
+    "increase the agent token budget to 8000", "how much time is left on my timer",
 ])
 def test_non_money_questions_are_not_promoted_to_finance(request_text):
     assert classify_tool_intent(request_text).category != "finance"
 
 
 def test_finance_family_registers_the_three_tools():
-    assert FAMILY_TOOLS["finance"] == FINANCE_TOOLS == {"query_finances", "add_transaction", "add_transfer"}
+    assert FAMILY_TOOLS["finance"] == FINANCE_TOOLS == {"query_finances", "add_transaction", "add_transfer",
+                                                          "update_valuation", "manage_recurring", "set_budget"}
     names = {s["function"]["name"] for s in FUNCTION_TOOL_SCHEMAS}
     assert FINANCE_TOOLS <= names
 
@@ -69,7 +94,7 @@ def test_query_is_read_only_and_writes_are_writes():
     gated by the approval card exactly like notes and calendar writes."""
     read = capabilities_for_action("query_finances", "{}")
     assert read.known and read.effects == {ToolEffect.READ_PRIVATE}
-    for tool in ("add_transaction", "add_transfer"):
+    for tool in ("add_transaction", "add_transfer", "update_valuation"):
         caps = capabilities_for_action(tool, '{"amount": "1"}')
         assert caps.known and ToolEffect.WRITE_PRIVATE in caps.effects
         assert caps.effects == capabilities_for_action("manage_notes", '{"action": "add"}').effects
@@ -98,7 +123,7 @@ def test_plan_mode_blocks_finance_writes():
     from src.tool_security import plan_mode_disabled_tools
 
     disabled = plan_mode_disabled_tools()
-    assert {"add_transaction", "add_transfer"} <= disabled
+    assert {"add_transaction", "add_transfer", "update_valuation", "manage_recurring", "set_budget"} <= disabled
     assert "query_finances" not in disabled
 
 
@@ -110,3 +135,9 @@ def test_native_calls_convert_to_tool_blocks():
 def test_keyword_hints_offer_finance_tools():
     hints = [tools for words, tools in ToolIndex._KEYWORD_HINTS.items() if "net worth" in words]
     assert hints and hints[0] == set(FINANCE_TOOLS)
+
+
+def test_manage_recurring_list_is_a_read_and_changes_are_writes():
+    assert capabilities_for_action("manage_recurring", '{"action": "list"}').effects == {ToolEffect.READ_PRIVATE}
+    for action in ("add", "confirm", "skip"):
+        assert ToolEffect.WRITE_PRIVATE in capabilities_for_action("manage_recurring", f'{{"action": "{action}"}}').effects

@@ -27,6 +27,7 @@ ALLOWED_SCOPES = {
     "memory:write",
     "cookbook:read",
     "cookbook:launch",
+    "finance:read",  # HEPHAESTUS PATCH: read-only finance tracker API
 }
 TOKEN_PROFILES = {
     "chat": ["chat"],

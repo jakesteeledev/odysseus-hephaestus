@@ -29,6 +29,17 @@ export function createEntryForm({ app, ui, now }) {
     return optionsHtml(items, selected);
   }
 
+  /** Investments and pensions that money out can be linked to as a contribution. */
+  function contributionAssets(existing) {
+    return app.state.assets.filter((a) => ['investment', 'pension'].includes(a.type)
+      && (!a.archived || a.id === existing?.contribution_asset_id));
+  }
+
+  /** Liabilities a money-out payment can go towards. */
+  function debts(existing) {
+    return app.state.liabilities.filter((d) => !d.archived || d.id === existing?.payment_liability_id);
+  }
+
   /**
    * Render into `container`. `existing` is a transaction row to edit (or
    * null for a new entry). `onDone()` runs after a successful save/delete.
@@ -70,6 +81,18 @@ export function createEntryForm({ app, ui, now }) {
             <select id="fin-category" class="task-form-input" name="category"></select>
           </div>
         </div>
+        ${contributionAssets(existing).length && !isTransfer ? `
+        <div data-show-out>
+          <label class="task-form-label" for="fin-contribution">Contribution to (optional)</label>
+          <select id="fin-contribution" class="task-form-input" name="contribution">${optionsHtml(
+            contributionAssets(existing).map((a) => ({ value: a.id, label: a.name })), existing?.contribution_asset_id || '', { blank: 'Not a contribution' })}</select>
+        </div>` : ''}
+        ${debts(existing).length && !isTransfer ? `
+        <div data-show-out>
+          <label class="task-form-label" for="fin-payment">Payment towards (optional)</label>
+          <select id="fin-payment" class="task-form-input" name="payment">${optionsHtml(
+            debts(existing).map((d) => ({ value: d.id, label: d.name })), existing?.payment_liability_id || '', { blank: 'Not a debt payment' })}</select>
+        </div>` : ''}
         <label class="task-form-label" for="fin-description">Description</label>
         <input id="fin-description" class="task-form-input" name="description" maxlength="200" autocomplete="off"
           placeholder="e.g. Tesco" value="${esc(existing?.description || '')}">
@@ -80,6 +103,14 @@ export function createEntryForm({ app, ui, now }) {
           <label class="task-form-label" for="fin-notes">Notes</label>
           <textarea id="fin-notes" class="task-form-input task-form-textarea" name="notes" rows="2" maxlength="2000">${esc(existing?.notes || '')}</textarea>
         </details>
+        ${existing && !isTransfer ? `
+        <div class="fin-make-recurring">
+          <select class="task-form-input" data-recurring-frequency aria-label="How often">
+            <option value="weekly">Weekly</option><option value="four_weekly">Every 4 weeks</option>
+            <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option>
+          </select>
+          <button type="button" class="task-btn" data-action="make-recurring" title="Track this as a regular payment or income">Make recurring</button>
+        </div>` : ''}
         <div class="fin-form-error" role="alert" hidden></div>
         <div class="task-form-actions">
           ${existing ? '<button type="button" class="task-btn task-btn-danger" data-action="delete">Delete</button><span style="flex:1"></span>' : ''}
@@ -105,6 +136,7 @@ export function createEntryForm({ app, ui, now }) {
       form.querySelectorAll('[data-show="transfer"]').forEach((el) => { el.hidden = mode !== 'transfer'; });
       form.querySelectorAll('[data-hide="transfer"]').forEach((el) => { el.hidden = mode === 'transfer'; });
       fromLabel.textContent = mode === 'transfer' ? 'From account' : 'Account';
+      form.querySelectorAll('[data-show-out]').forEach((el) => { el.hidden = mode !== 'out'; });
       if (mode === 'transfer') {
         const options = accountOptions(toId, { exclude: accountSel.value });
         toSel.innerHTML = options;
@@ -155,14 +187,26 @@ export function createEntryForm({ app, ui, now }) {
             Object.assign(body, { account_id: accountSel.value, direction: mode, category_id: catSel.value || null });
           }
           await app.updateTransaction(existing.id, body);
+          const contribution = mode === 'out' ? (form.querySelector('#fin-contribution')?.value || '') : '';
+          if (!isTransfer && contribution !== (existing.contribution_asset_id || '')) {
+            await app.linkContribution(existing.id, contribution || null);
+          }
+          const payment = mode === 'out' ? (form.querySelector('#fin-payment')?.value || '') : '';
+          if (!isTransfer && payment !== (existing.payment_liability_id || '')) {
+            await app.linkPayment(existing.id, payment || null);
+          }
           ui.showToast('Saved');
         } else if (mode === 'transfer') {
           if (!toSel.value || toSel.value === accountSel.value) { throw new Error('Choose two different accounts'); }
           await app.addTransfer({ from_account_id: accountSel.value, to_account_id: toSel.value, date, amount, description, notes });
           ui.showToast(`Transferred ${formatPence(pence)}`);
         } else {
+          const contribution = mode === 'out' ? (form.querySelector('#fin-contribution')?.value || '') : '';
           await app.addTransaction({ account_id: accountSel.value, date, amount, direction: mode,
-            category_id: catSel.value || null, description, notes });
+            category_id: catSel.value || null, description, notes }, {
+            contributionAssetId: contribution || null,
+            paymentLiabilityId: mode === 'out' ? (form.querySelector('#fin-payment')?.value || null) : null,
+          });
           ui.showToast(`Added ${mode === 'in' ? 'money in' : 'money out'}: ${formatPence(pence)}`);
         }
         onDone();
@@ -175,6 +219,15 @@ export function createEntryForm({ app, ui, now }) {
     });
 
     form.querySelector('[data-action="cancel"]')?.addEventListener('click', () => onCancel && onCancel());
+    form.querySelector('[data-action="make-recurring"]')?.addEventListener('click', async () => {
+      try {
+        await app.makeRecurring(existing.id, { frequency: form.querySelector('[data-recurring-frequency]').value });
+        ui.showToast('Added to Upcoming');
+        onDone();
+      } catch (err) {
+        showError(err.message || 'Could not make it recurring');
+      }
+    });
     form.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
       const what = isTransfer ? 'this transfer (both accounts)' : 'this transaction';
       const ok = await ui.styledConfirm(`Delete ${what}? This cannot be undone.`, { title: 'Delete', confirmText: 'Delete', danger: true });

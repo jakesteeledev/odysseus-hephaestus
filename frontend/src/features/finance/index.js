@@ -4,8 +4,14 @@ import { createFinanceStorage } from './infrastructure/storage.js';
 import { createFinanceState } from './application/state.js';
 import { createEntryForm } from './ui/entryForm.js';
 import { createAccountsView } from './ui/accountsView.js';
-import { createMonthNav, createSummaryView, createTransactionsView } from './ui/transactionsView.js';
+import { createItemView } from './ui/itemView.js';
+import { createLoanSection } from './ui/loanSection.js';
+import { createOverviewView } from './ui/overviewView.js';
+import { createMonthNav, createTransactionsView } from './ui/transactionsView.js';
 import { createImportView } from './ui/importView.js';
+import { createUpcomingView } from './ui/upcomingView.js';
+import { createBudgetsView } from './ui/budgetsView.js';
+import { createInsightsView } from './ui/insightsView.js';
 import { createSettingsView } from './ui/settingsView.js';
 import { createPanel } from './ui/panel.js';
 import uiModule from '/static/js/ui.js?v=20260916largetoolscroll1';
@@ -28,9 +34,15 @@ const ui = {
 const entryForm = createEntryForm({ app, ui, now });
 const monthNav = createMonthNav({ app });
 const views = {
-  accounts: createAccountsView({ app, ui }),
+  overview: createOverviewView({
+    app,
+    accountsView: createAccountsView({ app, ui }),
+    itemView: createItemView({ app, ui, now, loanSection: createLoanSection({ app, ui, now }) }),
+  }),
   transactions: createTransactionsView({ app, entryForm, monthNav }),
-  summary: createSummaryView({ app, monthNav }),
+  insights: createInsightsView({ app, monthNav, storage: { chartRange: () => app.chartRange(), rememberChartRange: (v) => app.rememberChartRange(v) } }),
+  upcoming: createUpcomingView({ app, ui, now }),
+  budgets: createBudgetsView({ app, ui, monthNav }),
   add: (container, afterSave) => entryForm.render(container, { onDone: afterSave }),
   import: createImportView({ app, ui }),
   settings: createSettingsView({ app, ui, now }),

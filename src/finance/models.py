@@ -15,6 +15,7 @@ import threading
 import weakref
 
 from sqlalchemy import (
+    UniqueConstraint,
     Boolean,
     CheckConstraint,
     Column,
@@ -119,6 +120,8 @@ class FinanceRule(TimestampMixin, Base):
     owner = Column(String, nullable=False, index=True)
     pattern = Column(String, nullable=False)
     category_id = Column(String, ForeignKey("finance_categories.id"), nullable=False)
+    # v2 (schema step 3): matching payments also count towards this liability.
+    liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=True)
 
 
 class FinanceBankMapping(TimestampMixin, Base):
@@ -132,7 +135,223 @@ class FinanceBankMapping(TimestampMixin, Base):
     config_json = Column(Text, nullable=False, default="{}")
 
 
-FINANCE_TABLES = [
+# ── v2: assets, liabilities and their history ──────────────────────────
+
+ASSET_TYPES = ("property", "investment", "pension", "vehicle", "other")
+LIABILITY_TYPES = ("mortgage", "loan", "student_loan", "bnpl", "other")
+ITEM_KINDS = ("asset", "liability")
+
+
+class FinanceAsset(TimestampMixin, Base):
+    """Something the owner holds outside their accounts (house, ISA, pension...)."""
+
+    __tablename__ = "finance_assets"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    asset_type = Column(String, nullable=False, default="other")
+    subtype = Column(String, nullable=False, default="")  # e.g. isa, sipp, crypto
+    provider = Column(String, nullable=False, default="")
+    notes = Column(Text, nullable=False, default="")
+    archived = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint("asset_type IN ('property', 'investment', 'pension', 'vehicle', 'other')",
+                        name="ck_finance_asset_type"),
+    )
+
+
+class FinanceLiability(TimestampMixin, Base):
+    """Money owed outside credit cards (mortgage, loans, student loan, BNPL...)."""
+
+    __tablename__ = "finance_liabilities"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    liability_type = Column(String, nullable=False, default="other")
+    subtype = Column(String, nullable=False, default="")  # e.g. personal, pcp, hp, plan_2
+    lender = Column(String, nullable=False, default="")
+    notes = Column(Text, nullable=False, default="")
+    archived = Column(Boolean, nullable=False, default=False)
+    # A mortgage secured on a property asset, for equity.
+    linked_asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=True)
+    # Interest rate in basis points (450 = 4.5%) for liabilities without a
+    # schedule, e.g. student loans (schema step 3).
+    interest_bp = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("liability_type IN ('mortgage', 'loan', 'student_loan', 'bnpl', 'other')",
+                        name="ck_finance_liability_type"),
+    )
+
+
+class FinanceValuation(TimestampMixin, Base):
+    """A dated value (asset) or balance owed (liability). The latest one counts."""
+
+    __tablename__ = "finance_valuations"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    item_kind = Column(String, nullable=False)
+    item_id = Column(String, nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    value_pence = Column(Integer, nullable=False)
+    note = Column(String, nullable=False, default="")
+
+    __table_args__ = (
+        CheckConstraint("item_kind IN ('asset', 'liability')", name="ck_finance_valuation_kind"),
+        CheckConstraint("value_pence >= 0", name="ck_finance_valuation_non_negative"),
+        Index("ix_finance_valuation_item_date", "item_kind", "item_id", "date"),
+    )
+
+
+class FinanceContribution(TimestampMixin, Base):
+    """Money paid into an investment or pension, optionally a linked transaction."""
+
+    __tablename__ = "finance_contributions"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    amount_pence = Column(Integer, nullable=False)
+    note = Column(String, nullable=False, default="")
+    # Deleting the transaction (or undoing its import) removes the contribution.
+    transaction_id = Column(String, ForeignKey("finance_transactions.id", ondelete="CASCADE"),
+                            nullable=True, unique=True)
+
+    __table_args__ = (
+        CheckConstraint("amount_pence > 0", name="ck_finance_contribution_positive"),
+    )
+
+
+class FinanceLoanSchedule(TimestampMixin, Base):
+    """Repayment terms for a mortgage, loan, car finance or BNPL (not student loans)."""
+
+    __tablename__ = "finance_loan_schedules"
+
+    liability_id = Column(String, ForeignKey("finance_liabilities.id", ondelete="CASCADE"), primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    start_date = Column(Date, nullable=False)
+    start_balance_pence = Column(Integer, nullable=False)
+    apr_bp = Column(Integer, nullable=False, default=0)  # 4.5% APR = 450
+    term_months = Column(Integer, nullable=True)
+    monthly_payment_pence = Column(Integer, nullable=True)  # fixed payment, if known
+    payment_day = Column(Integer, nullable=False, default=1)
+    balloon_pence = Column(Integer, nullable=False, default=0)  # PCP final payment
+
+    __table_args__ = (
+        CheckConstraint("start_balance_pence >= 0", name="ck_finance_schedule_balance"),
+        CheckConstraint("apr_bp >= 0", name="ck_finance_schedule_apr"),
+        CheckConstraint("payment_day BETWEEN 1 AND 31", name="ck_finance_schedule_day"),
+        CheckConstraint("balloon_pence >= 0", name="ck_finance_schedule_balloon"),
+    )
+
+
+class FinanceRepayment(TimestampMixin, Base):
+    """A payment against a liability: a linked transaction, or entered by hand."""
+
+    __tablename__ = "finance_repayments"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    amount_pence = Column(Integer, nullable=False)
+    note = Column(String, nullable=False, default="")
+    transaction_id = Column(String, ForeignKey("finance_transactions.id", ondelete="CASCADE"),
+                            nullable=True, unique=True)
+
+    __table_args__ = (
+        CheckConstraint("amount_pence > 0", name="ck_finance_repayment_positive"),
+    )
+
+
+FREQUENCIES = ("weekly", "four_weekly", "monthly", "quarterly", "yearly")
+
+
+class FinanceRecurring(TimestampMixin, Base):
+    """A regular payment or income: expected on schedule, confirmed by the user."""
+
+    __tablename__ = "finance_recurring"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    account_id = Column(String, ForeignKey("finance_accounts.id"), nullable=False)
+    amount_pence = Column(Integer, nullable=False)
+    direction = Column(String, nullable=False, default="out")
+    category_id = Column(String, ForeignKey("finance_categories.id"), nullable=True)
+    frequency = Column(String, nullable=False, default="monthly")
+    anchor_date = Column(Date, nullable=False)  # first due date; later ones follow the frequency
+    end_date = Column(Date, nullable=True)
+    match_text = Column(String, nullable=False, default="")  # words expected in the bank description
+    liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=True)  # loan payment
+    asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=True)  # regular contribution
+    archived = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint("amount_pence > 0", name="ck_finance_recurring_amount"),
+        CheckConstraint("direction IN ('in', 'out')", name="ck_finance_recurring_direction"),
+        CheckConstraint("frequency IN ('weekly', 'four_weekly', 'monthly', 'quarterly', 'yearly')",
+                        name="ck_finance_recurring_frequency"),
+    )
+
+
+class FinanceRecurringEvent(TimestampMixin, Base):
+    """The user's decision for one due date: confirmed (with a transaction) or skipped."""
+
+    __tablename__ = "finance_recurring_events"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    recurring_id = Column(String, ForeignKey("finance_recurring.id", ondelete="CASCADE"), nullable=False, index=True)
+    due_date = Column(Date, nullable=False)
+    status = Column(String, nullable=False)
+    # Deleting the transaction makes the occurrence expected again.
+    transaction_id = Column(String, ForeignKey("finance_transactions.id", ondelete="CASCADE"), nullable=True)
+    created_transaction = Column(Boolean, nullable=False, default=False)  # made by "confirm"
+
+    __table_args__ = (
+        CheckConstraint("status IN ('confirmed', 'skipped')", name="ck_finance_recurring_event_status"),
+        UniqueConstraint("recurring_id", "due_date", name="uq_finance_recurring_event_due"),
+    )
+
+
+class FinanceBudget(TimestampMixin, Base):
+    """A monthly spending limit for a category, from `month` until changed.
+
+    The limit for a month is the latest row on or before that month, so past
+    months keep the limit they had. ``limit_pence`` NULL means no budget from
+    that month. No rollover: each month starts fresh.
+    """
+
+    __tablename__ = "finance_budgets"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    category_id = Column(String, ForeignKey("finance_categories.id", ondelete="CASCADE"), nullable=False)
+    month = Column(Date, nullable=False)  # first day of the month it starts
+    limit_pence = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("limit_pence IS NULL OR limit_pence >= 0", name="ck_finance_budget_limit"),
+        UniqueConstraint("owner", "category_id", "month", name="uq_finance_budget_month"),
+    )
+
+
+class FinanceMeta(Base):
+    """Finance schema bookkeeping (key/value), e.g. schema_version."""
+
+    __tablename__ = "finance_meta"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
+
+V1_TABLES = [
     FinanceAccount.__table__,
     FinanceCategory.__table__,
     FinanceImportBatch.__table__,
@@ -140,17 +359,39 @@ FINANCE_TABLES = [
     FinanceRule.__table__,
     FinanceBankMapping.__table__,
 ]
+V2_TABLES = [
+    FinanceAsset.__table__,
+    FinanceLiability.__table__,
+    FinanceValuation.__table__,
+    FinanceContribution.__table__,
+]
+V3_TABLES = [
+    FinanceLoanSchedule.__table__,
+    FinanceRepayment.__table__,
+]
+V4_TABLES = [
+    FinanceRecurring.__table__,
+    FinanceRecurringEvent.__table__,
+]
+V5_TABLES = [FinanceBudget.__table__]
+FINANCE_TABLES = V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + [FinanceMeta.__table__]
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()
 _ensure_lock = threading.Lock()
 
 
 def ensure_tables(bind) -> None:
-    """Create the finance tables on *bind* if they are missing (idempotent)."""
+    """Bring the finance schema on *bind* up to date (idempotent, once per engine).
+
+    See ``src.finance.migrations``: existing finance data is backed up before
+    any migration step runs.
+    """
     if bind in _ensured:
         return
     with _ensure_lock:
         if bind in _ensured:
             return
-        Base.metadata.create_all(bind=bind, tables=FINANCE_TABLES)
+        from src.finance.migrations import migrate
+
+        migrate(bind)
         _ensured.add(bind)

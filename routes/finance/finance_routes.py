@@ -18,6 +18,11 @@ from pydantic import BaseModel, Field
 from core.database import SessionLocal, engine
 from src.auth_helpers import require_user
 from src.finance import csv_io, imports
+from src.finance import budgets as bud
+from src.finance import insights
+from src.finance import loans
+from src.finance import recurring as rec
+from src.finance import networth as nw
 from src.finance import service as fin
 from src.finance.models import ACCOUNT_TYPES, CATEGORY_COLORS, ensure_tables
 
@@ -92,21 +97,133 @@ class ImportRequest(BaseModel):
     mapping_name: str = ""
     category_overrides: Dict[str, str] = {}
     exclude_rows: List[int] = []
+    liability_overrides: Dict[str, str] = {}
 
 
 class RuleCreate(BaseModel):
     pattern: str
     category_id: str
+    liability_id: Optional[str] = None
 
 
 class RuleUpdate(BaseModel):
     pattern: Optional[str] = None
     category_id: Optional[str] = None
+    liability_id: Optional[str] = None
 
 
 class MappingSave(BaseModel):
     name: str
     config: Dict[str, Any]
+
+
+class ItemCreate(BaseModel):
+    name: str
+    type: str = "other"
+    subtype: str = ""
+    provider: str = ""
+    lender: str = ""
+    notes: str = ""
+    linked_asset_id: Optional[str] = None
+    value: Optional[str] = None
+    value_date: Optional[str] = None
+
+
+class ItemUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    subtype: Optional[str] = None
+    provider: Optional[str] = None
+    lender: Optional[str] = None
+    notes: Optional[str] = None
+    archived: Optional[bool] = None
+    linked_asset_id: Optional[str] = None
+
+
+class ValuationCreate(BaseModel):
+    value: str
+    date: Optional[str] = None
+    note: str = ""
+
+
+class ContributionCreate(BaseModel):
+    amount: str
+    date: Optional[str] = None
+    note: str = ""
+
+
+class ContributionLink(BaseModel):
+    asset_id: Optional[str] = None
+
+
+class ScheduleSet(BaseModel):
+    start_date: str
+    start_balance: str
+    apr: str = "0"
+    term_months: Optional[int] = None
+    monthly_payment: Optional[str] = None
+    payment_day: Optional[int] = None
+    balloon: str = "0"
+
+
+class RepaymentCreate(BaseModel):
+    amount: str
+    date: Optional[str] = None
+    note: str = ""
+
+
+class PaymentLink(BaseModel):
+    liability_id: Optional[str] = None
+
+
+class RateSet(BaseModel):
+    interest_rate: Optional[str] = None
+
+
+class RecurringCreate(BaseModel):
+    name: str
+    account_id: str
+    amount: str
+    direction: str = "out"
+    frequency: str = "monthly"
+    next_due: Optional[str] = None
+    end_date: Optional[str] = None
+    category_id: Optional[str] = None
+    match_text: str = ""
+    liability_id: Optional[str] = None
+    asset_id: Optional[str] = None
+
+
+class RecurringUpdate(BaseModel):
+    name: Optional[str] = None
+    account_id: Optional[str] = None
+    amount: Optional[str] = None
+    direction: Optional[str] = None
+    frequency: Optional[str] = None
+    next_due: Optional[str] = None
+    end_date: Optional[str] = None
+    category_id: Optional[str] = None
+    match_text: Optional[str] = None
+    liability_id: Optional[str] = None
+    asset_id: Optional[str] = None
+    archived: Optional[bool] = None
+
+
+class OccurrenceAction(BaseModel):
+    due_date: str
+    date: Optional[str] = None
+    amount: Optional[str] = None
+    transaction_id: Optional[str] = None
+
+
+class BudgetSet(BaseModel):
+    limit: Optional[str] = None  # empty/null removes the budget from `month`
+    month: Optional[str] = None  # YYYY-MM, default this month
+
+
+class MakeRecurring(BaseModel):
+    frequency: str = "monthly"
+    name: Optional[str] = None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -350,6 +467,7 @@ def setup_finance_routes() -> APIRouter:
                 db, owner, data=body.csv_text, mapping=body.mapping, account_id=body.account_id,
                 filename=body.filename, mapping_name=body.mapping_name,
                 category_overrides=body.category_overrides, exclude_rows=body.exclude_rows,
+                liability_overrides=body.liability_overrides,
             )
 
     @router.get("/imports")
@@ -377,7 +495,8 @@ def setup_finance_routes() -> APIRouter:
         owner = _owner(request)
         with _session() as db:
             return imports.rule_to_dict(imports.create_rule(db, owner, pattern=body.pattern,
-                                                            category_id=body.category_id))
+                                                            category_id=body.category_id,
+                                                            liability_id=body.liability_id))
 
     @router.patch("/rules/{rule_id}")
     def update_rule(rule_id: str, body: RuleUpdate, request: Request):
@@ -413,5 +532,258 @@ def setup_finance_routes() -> APIRouter:
         with _session() as db:
             imports.delete_mapping(db, owner, mapping_id)
             return {"ok": True}
+
+    # Net worth, assets and liabilities (v2)
+
+    @router.get("/networth")
+    def networth(request: Request, as_of: Optional[str] = None):
+        owner = _owner(request)
+        with _session() as db:
+            return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"))
+
+    # Charts (v2 stage 5): specific paths before the generic routes below.
+
+    @router.get("/insights/history")
+    def insights_history(request: Request, range: str = "1y"):
+        owner = _owner(request)
+        with _session() as db:
+            return insights.net_worth_history(db, owner, range_key=range)
+
+    @router.get("/insights/monthly")
+    def insights_monthly(request: Request, range: str = "1y", category_id: Optional[str] = None):
+        owner = _owner(request)
+        with _session() as db:
+            return insights.monthly_totals(db, owner, range_key=range, category_id=category_id or None)
+
+    @router.get("/insights/spending")
+    def insights_spending(request: Request, start: str, end: str, account_id: Optional[str] = None):
+        """Money in/out and spending by category for start..end (both inclusive)."""
+        owner = _owner(request)
+        with _session() as db:
+            start_d, end_d = _range(None, None, start, end)
+            if start_d is None or end_d is None or end_d <= start_d:
+                raise fin.FinanceError("choose a start date before the end date")
+            return fin.summary(db, owner, start=start_d, end=end_d, account_id=account_id or None)
+
+    # Budgets (v2 stage 4): specific paths before the generic routes below.
+
+    @router.get("/budgets")
+    def budgets(request: Request, year: Optional[int] = None, month: Optional[int] = None):
+        owner = _owner(request)
+        with _session() as db:
+            return bud.budget_status(db, owner, year=year, month=month)
+
+    @router.put("/budgets/{category_id}")
+    def set_budget(category_id: str, body: BudgetSet, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            row = bud.set_budget(db, owner, category_id, body.limit, month=body.month)
+            return {"category_id": row.category_id, "month": row.month.isoformat()[:7], "limit_pence": row.limit_pence}
+
+    # Recurring items (v2 stage 3): specific paths before the generic routes below.
+
+    @router.get("/upcoming")
+    def upcoming(request: Request, days: int = 30):
+        owner = _owner(request)
+        with _session() as db:
+            return rec.upcoming(db, owner, days=days)
+
+    @router.get("/recurring")
+    def list_recurring(request: Request, include_archived: bool = False):
+        owner = _owner(request)
+        with _session() as db:
+            return {"recurring": rec.list_recurring(db, owner, include_archived=include_archived)}
+
+    @router.get("/recurring/suggestions")
+    def recurring_suggestions(request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return {"suggestions": rec.suggestions(db, owner)}
+
+    @router.post("/recurring")
+    def create_recurring(body: RecurringCreate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return rec.recurring_to_dict(rec.create_recurring(db, owner, **body.model_dump()))
+
+    @router.patch("/recurring/{recurring_id}")
+    def update_recurring(recurring_id: str, body: RecurringUpdate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return rec.recurring_to_dict(rec.update_recurring(db, owner, recurring_id, **_changes(body)))
+
+    @router.delete("/recurring/{recurring_id}")
+    def delete_recurring(recurring_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            rec.delete_recurring(db, owner, recurring_id)
+            return {"ok": True}
+
+    @router.post("/recurring/{recurring_id}/{action}")
+    def occurrence_action(recurring_id: str, action: str, body: OccurrenceAction, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            if action == "confirm":
+                event = rec.confirm(db, owner, recurring_id, body.due_date, on=body.date, amount=body.amount)
+            elif action == "match":
+                if not body.transaction_id:
+                    raise fin.FinanceError("choose the transaction to match")
+                event = rec.match(db, owner, recurring_id, body.due_date, body.transaction_id)
+            elif action == "skip":
+                event = rec.skip(db, owner, recurring_id, body.due_date)
+            elif action == "undo":
+                rec.undo(db, owner, recurring_id, body.due_date)
+                return {"ok": True}
+            else:
+                raise HTTPException(404, "unknown action")
+            return {"ok": True, "status": event.status, "transaction_id": event.transaction_id}
+
+    @router.post("/transactions/{transaction_id}/make-recurring")
+    def make_recurring(transaction_id: str, body: MakeRecurring, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            item = rec.make_recurring_from_transaction(db, owner, transaction_id, frequency=body.frequency,
+                                                       name=body.name)
+            return rec.recurring_to_dict(item)
+
+    # Loans (v2 stage 2): specific paths before the generic routes below.
+
+    @router.get("/liabilities/{liability_id}/loan")
+    def loan_details(liability_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return loans.loan_details(db, owner, liability_id)
+
+    @router.put("/liabilities/{liability_id}/schedule")
+    def set_schedule(liability_id: str, body: ScheduleSet, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return loans.schedule_to_dict(loans.set_schedule(db, owner, liability_id, **body.model_dump()))
+
+    @router.delete("/liabilities/{liability_id}/schedule")
+    def delete_schedule(liability_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            loans.delete_schedule(db, owner, liability_id)
+            return {"ok": True}
+
+    @router.put("/liabilities/{liability_id}/interest-rate")
+    def set_rate(liability_id: str, body: RateSet, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            item = loans.set_interest_rate(db, owner, liability_id, body.interest_rate)
+            return {"interest_rate_percent": item.interest_bp / 100 if item.interest_bp is not None else None}
+
+    @router.post("/liabilities/{liability_id}/repayments")
+    def add_repayment(liability_id: str, body: RepaymentCreate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return loans.repayment_to_dict(loans.add_repayment(db, owner, liability_id, amount=body.amount,
+                                                               on=body.date, note=body.note))
+
+    @router.delete("/repayments/{repayment_id}")
+    def delete_repayment(repayment_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            loans.delete_repayment(db, owner, repayment_id)
+            return {"ok": True}
+
+    @router.put("/transactions/{transaction_id}/payment")
+    def link_payment(transaction_id: str, body: PaymentLink, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            row = loans.link_transaction_payment(db, owner, transaction_id, body.liability_id)
+            return {"payment": loans.repayment_to_dict(row) if row else None}
+
+    # Specific paths before the generic /{collection}/{item_id} routes below.
+    @router.delete("/valuations/{valuation_id}")
+    def delete_valuation(valuation_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            nw.delete_valuation(db, owner, valuation_id)
+            return {"ok": True}
+
+    @router.delete("/contributions/{contribution_id}")
+    def delete_contribution(contribution_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            nw.delete_contribution(db, owner, contribution_id)
+            return {"ok": True}
+
+    def _kind(collection: str) -> str:
+        if collection not in ("assets", "liabilities"):
+            raise HTTPException(404, "not found")
+        return "asset" if collection == "assets" else "liability"
+
+    @router.get("/{collection}")
+    def list_items(collection: str, request: Request, include_archived: bool = False):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            return {collection: nw.list_items(db, owner, kind, include_archived=include_archived)}
+
+    @router.post("/{collection}")
+    def create_item(collection: str, body: ItemCreate, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        data = body.model_dump()
+        if kind == "asset":
+            data.pop("lender"); data.pop("linked_asset_id")
+        else:
+            data.pop("provider")
+        with _session() as db:
+            item = nw.create_item(db, owner, kind, **data)
+            return nw._item_dict(db, owner, kind, item, None)
+
+    @router.patch("/{collection}/{item_id}")
+    def update_item(collection: str, item_id: str, body: ItemUpdate, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            item = nw.update_item(db, owner, kind, item_id, **_changes(body))
+            return nw._item_dict(db, owner, kind, item, None)
+
+    @router.delete("/{collection}/{item_id}")
+    def delete_item(collection: str, item_id: str, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            nw.delete_item(db, owner, kind, item_id)
+            return {"ok": True}
+
+    @router.get("/{collection}/{item_id}/valuations")
+    def list_valuations(collection: str, item_id: str, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            return {"valuations": nw.list_valuations(db, owner, kind, item_id)}
+
+    @router.post("/{collection}/{item_id}/valuations")
+    def add_valuation(collection: str, item_id: str, body: ValuationCreate, request: Request):
+        kind = _kind(collection)
+        owner = _owner(request)
+        with _session() as db:
+            snap = nw.set_valuation(db, owner, kind, item_id, value=body.value, on=body.date, note=body.note)
+            return nw.valuation_to_dict(snap)
+
+    @router.get("/assets/{asset_id}/contributions")
+    def list_contributions(asset_id: str, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return {"contributions": nw.list_contributions(db, owner, asset_id)}
+
+    @router.post("/assets/{asset_id}/contributions")
+    def add_contribution(asset_id: str, body: ContributionCreate, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            return nw.contribution_to_dict(nw.add_contribution(db, owner, asset_id, amount=body.amount,
+                                                               on=body.date, note=body.note))
+
+    @router.put("/transactions/{transaction_id}/contribution")
+    def link_contribution(transaction_id: str, body: ContributionLink, request: Request):
+        owner = _owner(request)
+        with _session() as db:
+            row = nw.link_transaction_contribution(db, owner, transaction_id, body.asset_id)
+            return {"contribution": nw.contribution_to_dict(row) if row else None}
 
     return router

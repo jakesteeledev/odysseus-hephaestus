@@ -3334,6 +3334,7 @@ const _TOKEN_SCOPES = [
   { key: 'memory:write',      label: 'Memory write',      detail: 'Write memory when enabled' },
   { key: 'cookbook:read',     label: 'Cookbook read',     detail: 'List cookbook tasks + tail their tmux output' },
   { key: 'cookbook:launch',   label: 'Cookbook launch',   detail: 'Launch and stop cookbook serve tasks' },
+  { key: 'finance:read',      label: 'Finance read',      detail: 'Read net worth, balances, transactions, bills and budgets (no changes)' },  // HEPHAESTUS PATCH
 ];
 
 function _renderTokenScopeRows(t) {

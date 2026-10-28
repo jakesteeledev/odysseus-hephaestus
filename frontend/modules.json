@@ -260,6 +260,38 @@
       "deployment": "js/features/finance/ui/panel.js"
     },
     {
+      "source": "features/finance/domain/items.js",
+      "deployment": "js/features/finance/domain/items.js"
+    },
+    {
+      "source": "features/finance/ui/itemView.js",
+      "deployment": "js/features/finance/ui/itemView.js"
+    },
+    {
+      "source": "features/finance/ui/overviewView.js",
+      "deployment": "js/features/finance/ui/overviewView.js"
+    },
+    {
+      "source": "features/finance/ui/loanSection.js",
+      "deployment": "js/features/finance/ui/loanSection.js"
+    },
+    {
+      "source": "features/finance/ui/upcomingView.js",
+      "deployment": "js/features/finance/ui/upcomingView.js"
+    },
+    {
+      "source": "features/finance/ui/budgetsView.js",
+      "deployment": "js/features/finance/ui/budgetsView.js"
+    },
+    {
+      "source": "features/finance/ui/charts.js",
+      "deployment": "js/features/finance/ui/charts.js"
+    },
+    {
+      "source": "features/finance/ui/insightsView.js",
+      "deployment": "js/features/finance/ui/insightsView.js"
+    },
+    {
       "source": "features/finance/index.js",
       "deployment": "js/features/finance/index.js",
       "legacyImports": [

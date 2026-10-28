@@ -48,7 +48,17 @@ MAX_MAPPING_NAME_LEN = 60
 
 
 def rule_to_dict(rule: FinanceRule) -> dict:
-    return {"id": rule.id, "pattern": rule.pattern, "category_id": rule.category_id}
+    return {"id": rule.id, "pattern": rule.pattern, "category_id": rule.category_id,
+            "liability_id": rule.liability_id}
+
+
+def _rule_liability(db: Session, owner: str, liability_id) -> Optional[str]:
+    """Validate an optional liability for a rule ("... -> Mortgage payment")."""
+    if liability_id in (None, ""):
+        return None
+    from src.finance.loans import _liability
+
+    return _liability(db, owner, liability_id).id
 
 
 def list_rules(db: Session, owner) -> list[dict]:
@@ -71,10 +81,11 @@ def _clean_pattern(pattern) -> str:
     return text
 
 
-def create_rule(db: Session, owner, *, pattern, category_id) -> FinanceRule:
+def create_rule(db: Session, owner, *, pattern, category_id, liability_id=None) -> FinanceRule:
     owner = _require_owner(owner)
     pattern = _clean_pattern(pattern)
     category = _get_category(db, owner, category_id)
+    liability = _rule_liability(db, owner, liability_id)
     existing = (
         db.query(FinanceRule)
         .filter(FinanceRule.owner == owner, func.lower(FinanceRule.pattern) == pattern.lower())
@@ -83,17 +94,24 @@ def create_rule(db: Session, owner, *, pattern, category_id) -> FinanceRule:
     if existing is not None:
         # "Remember this" twice for the same text just updates the category.
         existing.category_id = category.id
+        existing.liability_id = liability
         db.flush()
         return existing
-    rule = FinanceRule(id=_new_id(), owner=owner, pattern=pattern, category_id=category.id)
+    rule = FinanceRule(id=_new_id(), owner=owner, pattern=pattern, category_id=category.id,
+                       liability_id=liability)
     db.add(rule)
     db.flush()
     return rule
 
 
-def update_rule(db: Session, owner, rule_id, *, pattern=None, category_id=None) -> FinanceRule:
+_UNSET = object()
+
+
+def update_rule(db: Session, owner, rule_id, *, pattern=None, category_id=None, liability_id=_UNSET) -> FinanceRule:
     owner = _require_owner(owner)
     rule = _get_rule(db, owner, rule_id)
+    if liability_id is not _UNSET:
+        rule.liability_id = _rule_liability(db, owner, liability_id)
     if pattern is not None:
         rule.pattern = _clean_pattern(pattern)
     if category_id is not None:
@@ -224,6 +242,7 @@ def preview_import(db: Session, owner, *, data, mapping: dict, account_id) -> di
             "duplicate": item.row_number in plan["duplicates"],
             "category_id": plan["categories"].get(item.row_number),
             "rule_id": plan["rules"].get(item.row_number),
+            "liability_id": plan["liabilities"].get(item.row_number),
         }
         rows.append(entry)
     errors = sum(1 for r in rows if r["error"])
@@ -260,7 +279,7 @@ def _plan(db: Session, owner: str, account: FinanceAccount, parsed) -> dict:
             existing[_dup_key(tx.date, tx.amount_pence, tx.direction, tx.description)] += 1
     matcher = RuleMatcher(db.query(FinanceRule).filter(FinanceRule.owner == owner).all())
     fallback = uncategorised(db, owner).id
-    duplicates, categories, rules = set(), {}, {}
+    duplicates, categories, rules, liabilities = set(), {}, {}, {}
     for item in good:
         key = _dup_key(item.date, item.amount_pence, item.direction, item.description)
         if existing[key] > 0:
@@ -270,7 +289,8 @@ def _plan(db: Session, owner: str, account: FinanceAccount, parsed) -> dict:
         rule = matcher.match(item.description)
         categories[item.row_number] = rule.category_id if rule else fallback
         rules[item.row_number] = rule.id if rule else None
-    return {"duplicates": duplicates, "categories": categories, "rules": rules}
+        liabilities[item.row_number] = rule.liability_id if rule and item.direction == "out" else None
+    return {"duplicates": duplicates, "categories": categories, "rules": rules, "liabilities": liabilities}
 
 
 def commit_import(
@@ -284,17 +304,21 @@ def commit_import(
     mapping_name: str = "",
     category_overrides: Optional[dict] = None,
     exclude_rows: Optional[list] = None,
+    liability_overrides: Optional[dict] = None,
 ) -> dict:
     """Import a statement as one batch. Returns the batch and skipped rows.
 
     *category_overrides* maps row numbers to category ids chosen in the
-    preview; *exclude_rows* lists row numbers the user unticked.
+    preview; *exclude_rows* lists row numbers the user unticked;
+    *liability_overrides* maps row numbers to a liability the payment goes
+    towards ("" clears a link suggested by a rule).
     """
     owner = _require_owner(owner)
     account = _get_account(db, owner, account_id)
     _, parsed = _parse(data, mapping)
     plan = _plan(db, owner, account, parsed)
     overrides = {int(k): v for k, v in (category_overrides or {}).items()}
+    liability_choice = {int(k): v for k, v in (liability_overrides or {}).items()}
     excluded = {int(r) for r in (exclude_rows or [])}
     valid_categories = {c.id for c in db.query(FinanceCategory.id).filter(FinanceCategory.owner == owner)}
 
@@ -319,11 +343,16 @@ def commit_import(
         category_id = overrides.get(item.row_number) or plan["categories"].get(item.row_number)
         if category_id not in valid_categories:
             raise FinanceError(f"row {item.row_number}: unknown category")
-        create_transaction(
+        tx = create_transaction(
             db, owner, account_id=account.id, date=item.date, amount=Decimal(item.amount_pence) / 100,
             direction=item.direction, category_id=category_id, description=item.description,
             import_batch_id=batch.id,
         )
+        liability_id = liability_choice.get(item.row_number, plan["liabilities"].get(item.row_number))
+        if liability_id and item.direction == "out":
+            from src.finance.loans import link_transaction_payment
+
+            link_transaction_payment(db, owner, tx.id, liability_id)
         imported += 1
     batch.imported_count = imported
     batch.skipped_count = len(skipped)

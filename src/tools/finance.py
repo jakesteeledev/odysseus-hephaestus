@@ -24,7 +24,8 @@ from src.tools._common import _parse_tool_args
 
 logger = logging.getLogger(__name__)
 
-QUERY_VIEWS = ("overview", "net_worth", "balances", "summary", "transactions")
+QUERY_VIEWS = ("overview", "net_worth", "balances", "assets", "liabilities", "upcoming", "budgets", "summary",
+               "transactions")
 _DEFAULT_TX_LIMIT = 10
 _MAX_TX_LIMIT = 50
 
@@ -172,7 +173,12 @@ async def do_query_finances(content, owner: Optional[str] = None) -> Dict:
     view = str(_first(args, "view", "action", "type", default="overview")).strip().lower().replace(" ", "_").replace("-", "_")
     view = {"networth": "net_worth", "worth": "net_worth", "total": "net_worth", "balance": "balances",
             "accounts": "balances", "spending": "summary", "totals": "summary", "breakdown": "summary",
-            "recent": "transactions", "list": "transactions", "transaction": "transactions"}.get(view, view)
+            "recent": "transactions", "list": "transactions", "transaction": "transactions",
+            "asset": "assets", "investments": "assets", "pensions": "assets", "property": "assets",
+            "liability": "liabilities", "debts": "liabilities", "debt": "liabilities", "loans": "liabilities",
+            "owe": "liabilities", "mortgage": "liabilities", "bills": "upcoming", "recurring": "upcoming",
+            "due": "upcoming", "subscriptions": "upcoming", "scheduled": "upcoming", "budget": "budgets",
+            "left": "budgets"}.get(view, view)
     if view not in QUERY_VIEWS:
         return _err(f"view must be one of: {', '.join(QUERY_VIEWS)}")
     try:
@@ -188,23 +194,184 @@ async def do_query_finances(content, owner: Optional[str] = None) -> Dict:
         return _err(f"Could not read finances: {exc}")
 
 
+def _net_worth_text(worth: dict) -> list[str]:
+    lines = [
+        f"Net worth: {format_pence(worth['net_worth_pence'])}",
+        f"Assets: {format_pence(worth['assets_total_pence'])}",
+    ]
+    for group in worth["assets"]:
+        lines.append(f"- {group['label']}: {format_pence(group['total_pence'])}")
+        lines += [f"  - {_item_line(i)}" for i in group["items"]]
+    lines.append(f"Liabilities (owed): {format_pence(worth['liabilities_total_pence'])}")
+    for group in worth["liabilities"]:
+        lines.append(f"- {group['label']}: {format_pence(group['total_pence'])}")
+        lines += [f"  - {_item_line(i)}" for i in group["items"]]
+    if not worth["liabilities"]:
+        lines.append("- none recorded")
+    return lines
+
+
+def _item_line(item: dict) -> str:
+    text = f"{item['name']}: {format_pence(item['value_pence'])}"
+    extras = []
+    if item.get("value_date"):
+        extras.append(f"as of {item['value_date']}")
+    elif item.get("kind") in ("asset", "liability"):
+        extras.append("no value recorded yet")
+    if "gain_pence" in item:
+        extras.append(f"contributed {format_pence(item['contributions_pence'])}, "
+                      f"gain {format_pence(item['gain_pence'])}")
+    if "equity_pence" in item and item.get("mortgages"):
+        extras.append(f"equity {format_pence(item['equity_pence'])}")
+    if item.get("archived"):
+        extras.append("archived")
+    return text + (f" ({'; '.join(extras)})" if extras else "")
+
+
+def _loan_lines(loan: dict) -> list[str]:
+    lines = []
+    if loan.get("interest_rate_percent") is not None:
+        lines.append(f"Interest rate: {loan['interest_rate_percent']:g}%")
+    p = loan.get("projection")
+    if p and loan["balance_pence"] > 0:
+        if p.get("pays_off") is False:
+            lines.append("At the current payment this debt never pays off (payment is below the interest).")
+        elif p.get("payoff_date"):
+            lines.append(
+                f"Next payment {format_pence(p['monthly_payment_pence'])} on {p['next_payment_date']}; "
+                f"{p['remaining_payments']} payments left, paid off {p['payoff_date']}; "
+                f"interest still to pay {format_pence(p['interest_remaining_pence'])}"
+                + (f"; final payment {format_pence(p['final_payment_pence'])}"
+                   if (loan.get("schedule") or {}).get("balloon_pence") else ""))
+    if loan.get("total_paid_pence"):
+        lines.append(f"Paid so far {format_pence(loan['total_paid_pence'])}, of which interest "
+                     f"{format_pence(loan['interest_paid_pence'])}")
+    if loan.get("missed_payments"):
+        lines.append("Missed expected payment(s): " + ", ".join(loan["missed_payments"]))
+    return lines
+
+
 def _query(db, owner: str, view: str, args: dict) -> Dict:
+    from src.finance import networth as nw
+
     overview = fin.accounts_overview(db, owner)
     accounts = overview["accounts"]
     data: dict = {"view": view, "currency": "GBP"}
     lines: list[str] = []
-    if not accounts and view != "transactions":
-        return {"response": "The user has no finance accounts yet. They can add accounts in the Finance window.",
+    has_items = bool(nw.list_items(db, owner, "asset") or nw.list_items(db, owner, "liability"))
+    if not accounts and not has_items and view not in ("transactions", "assets", "liabilities"):
+        return {"response": "The user has no finance accounts, assets or liabilities yet. They can add them "
+                            "in the Finance window.",
                 "data": {"view": view, "accounts": [], "net_worth_pence": 0}, "exit_code": 0}
 
-    if view in ("overview", "net_worth", "balances"):
+    if view in ("overview", "net_worth"):
+        worth = nw.net_worth(db, owner)
+        data["net_worth"] = worth
+        data["net_worth_pence"] = worth["net_worth_pence"]
+        lines += _net_worth_text(worth)
+
+    if view == "balances":
         data["net_worth_pence"] = overview["total_pence"]
         data["accounts"] = [{"name": a["name"], "type": a["account_type"], "balance_pence": a["balance_pence"],
                              "balance": format_pence(a["balance_pence"])} for a in accounts]
-        lines.append(f"Net worth (all active accounts): {format_pence(overview['total_pence'])}")
-        if view != "net_worth" or len(accounts) > 1:
-            lines.append("Balances:")
-            lines += _balances_text(accounts)
+        lines.append(f"Total across active accounts: {format_pence(overview['total_pence'])}")
+        lines.append("Balances:")
+        lines += _balances_text(accounts)
+
+    if view == "budgets":
+        from src.finance import budgets as bud
+
+        month = _first(args, "month")
+        start = bud.parse_month(month) if month is not None else None
+        status = bud.budget_status(db, owner, year=start.year if start else None,
+                                   month=start.month if start else None)
+        rows = status["budgets"]
+        if _first(args, "category"):
+            match = match_name(args["category"], rows)
+            if not match.ok:
+                if match.status == "ambiguous":
+                    return _err(f"'{args['category']}' matches more than one budget: {', '.join(match.options)}. "
+                                "Ask the user which one.")
+                names = ", ".join(r["name"] for r in rows) or "none yet"
+                return _err(f"There is no budget for '{args['category']}' in {status['month']}. Budgets: {names}. "
+                            "The user can set one with set_budget.")
+            rows = [match.item]
+        data["budgets"] = {**status, "budgets": rows}
+        if not rows:
+            lines.append(f"No budgets set for {status['month']}.")
+        else:
+            lines.append(f"Budgets for {status['month']}" + (" (month finished)" if status["is_past"] else "") + ":")
+            for r in rows:
+                state = {"over": "OVER BUDGET", "warning": "close to the limit", "ok": "on track"}[r["state"]]
+                line = (f"- {r['name']}: spent {format_pence(r['spent_pence'])} of {format_pence(r['limit_pence'])}, "
+                        + (f"{format_pence(r['remaining_pence'])} left" if r["remaining_pence"] >= 0
+                           else f"{format_pence(-r['remaining_pence'])} over"))
+                if r["committed_pence"]:
+                    line += (f"; {format_pence(r['committed_pence'])} more expected from recurring items, leaving "
+                             f"{format_pence(r['left_after_committed_pence'])}")
+                lines.append(f"{line} ({state})")
+            if not _first(args, "category") and status["unbudgeted_spent_pence"]:
+                lines.append(f"Spending in categories without a budget: {format_pence(status['unbudgeted_spent_pence'])}")
+
+    if view == "upcoming":
+        from src.finance import recurring as rec
+
+        try:
+            days = int(_first(args, "days", default=30))
+        except (TypeError, ValueError):
+            days = 30
+        up = rec.upcoming(db, owner, days=max(1, min(days, 366)))
+        data["upcoming"] = up
+        names = {a["id"]: a["name"] for a in fin.list_accounts(db, owner, include_archived=True)}
+        rows = [r for r in up["items"] if r["status"] in ("overdue", "expected")]
+        if not rows:
+            lines.append(f"Nothing expected between {up['today']} and {up['until']}.")
+        else:
+            lines.append(f"Expected recurring items up to {up['until']} (not yet confirmed):")
+            for r in rows:
+                sign = "+" if r["direction"] == "in" else "-"
+                extra = " OVERDUE" if r["status"] == "overdue" else ""
+                if r["matches"]:
+                    extra += " (a matching transaction is already recorded; confirm to match it)"
+                lines.append(f"- {r['due_date']} {r['name']} {sign}{format_pence(r['amount_pence'])} "
+                             f"[{names.get(r['account_id'], '?')}, {r['frequency_label'].lower()}]{extra}")
+            total_out = sum(r["amount_pence"] for r in rows if r["direction"] == "out")
+            lines.append(f"Total going out: {format_pence(total_out)}")
+        if up["projected_balances"]:
+            lines.append(f"Projected balances at {up['month_end']} (after expected items this month):")
+            lines += [f"- {p['name']}: {format_pence(p['projected_pence'])} (now {format_pence(p['balance_pence'])})"
+                      for p in up["projected_balances"]]
+
+    if view in ("assets", "liabilities"):
+        kind = "asset" if view == "assets" else "liability"
+        items = nw.list_items(db, owner, kind)
+        if _first(args, "name"):
+            match = match_name(args["name"], items)
+            if not match.ok:
+                shown = ", ".join(match.options[:15]) or "none yet"
+                word = "matches more than one" if match.status == "ambiguous" else "doesn't match any"
+                return _err(f"'{args['name']}' {word} {kind}: {shown}. Ask the user which one.")
+            items = [match.item]
+        if kind == "liability":
+            from src.finance.loans import loan_details
+
+            for item in items:
+                item["loan"] = loan_details(db, owner, item["id"])
+        data[view] = items
+        if not items:
+            lines.append(f"No {view} recorded yet.")
+        else:
+            label = "Assets" if kind == "asset" else "Liabilities (owed)"
+            lines.append(f"{label}: {format_pence(sum(i['value_pence'] for i in items))}")
+            for i in items:
+                lines.append(f"- {_item_line(i)} [{i['type'].replace('_', ' ')}]")
+                if i.get("loan"):
+                    lines += [f"  {line}" for line in _loan_lines(i["loan"])]
+        if kind == "liability":
+            cards = [a for a in accounts if a["account_type"] == "credit_card"]
+            if cards:
+                lines.append("Credit cards (owed): " + ", ".join(
+                    f"{a['name']} {format_pence(-a['balance_pence'])}" for a in cards))
 
     if view in ("overview", "summary"):
         account_id = None
@@ -301,12 +468,37 @@ async def do_add_transaction(content, owner: Optional[str] = None) -> Dict:
                 category, error = _resolve(db, owner, "category", category_query)
                 if error:
                     return error
+            liability = None
+            towards = _first(args, "towards", "liability", "pays_off", "debt")
+            if towards is not None:
+                if direction != "out":
+                    return _err("Nothing saved. Only money going out can pay towards a debt.")
+                from src.finance import networth as nw
+
+                debts = nw.list_items(db, owner, "liability")
+                match = match_name(towards, debts)
+                if not match.ok:
+                    shown = ", ".join(match.options[:15]) or "none yet"
+                    if match.status == "ambiguous":
+                        return _err(f"Nothing saved. '{towards}' matches more than one debt: {shown}. "
+                                    "Ask the user which one.")
+                    return _err(f"Nothing saved. No debt called '{towards}'. Existing debts: {shown}. "
+                                "Ask the user which one, or leave it unlinked. Do not create one.")
+                liability = match.item
             tx = fin.create_transaction(
                 db, owner, account_id=account["id"], date=day, amount=amount, direction=direction,
                 category_id=category["id"] if category else None,
                 description=str(_first(args, "description", "desc", "name", default="")),
                 notes=str(_first(args, "notes", "note", default="")),
             )
+            owed_after = None
+            if liability is not None:
+                from src.finance.loans import balance as loan_balance, link_transaction_payment
+                from src.finance.models import FinanceLiability
+
+                link_transaction_payment(db, owner, tx.id, liability["id"])
+                row = db.query(FinanceLiability).filter(FinanceLiability.id == liability["id"]).first()
+                owed_after = loan_balance(db, owner, row)[0]
             category_name = category["name"] if category else fin.UNCATEGORISED
             balance = fin.account_balances(db, owner, [account["id"]])[account["id"]]
             saved = fin.transaction_to_dict(tx)  # read before commit expires the row
@@ -320,7 +512,9 @@ async def do_add_transaction(content, owner: Optional[str] = None) -> Dict:
     text = (f"{verb} recorded: {format_pence(saved['amount_pence'])} on {saved['date']}, "
             f"{account['name']}, {category_name}"
             + (f", \"{saved['description']}\"" if saved["description"] else "")
-            + f". {account['name']} balance is now {format_pence(balance)}.")
+            + f". {account['name']} balance is now {format_pence(balance)}."
+            + (f" Counted as a payment towards {liability['name']}; still owed {format_pence(owed_after)}."
+               if liability is not None else ""))
     return {"response": text, "data": saved, "exit_code": 0}
 
 
@@ -366,3 +560,242 @@ async def do_add_transfer(content, owner: Optional[str] = None) -> Dict:
             f"{format_pence(balances[source['id']])}, {target['name']} {format_pence(balances[target['id']])}. "
             "Transfers are not counted as income or spending.")
     return {"response": text, "data": {"transfer_id": saved["transfer_id"]}, "exit_code": 0}
+
+
+# ── update_valuation ────────────────────────────────────────────────────
+
+
+async def do_update_valuation(content, owner: Optional[str] = None) -> Dict:
+    """Set a new value (asset) or balance owed (liability), dated today by default."""
+    from src.finance import networth as nw
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return _err("Invalid JSON arguments")
+    try:
+        owner = fin.resolve_owner(owner)
+        name = _first(args, "name", "item", "asset", "liability")
+        value = _first(args, "value", "balance", "amount")
+        if name is None:
+            return _err("Nothing saved. Which asset or liability? Ask the user.")
+        if value is None:
+            return _err("Nothing saved. What is the new value or balance? Ask the user.")
+        kind_hint = str(_first(args, "kind", default="")).strip().lower()
+        day = _parse_day(_first(args, "date"), field="date")
+        with _session() as db:
+            candidates = []
+            for kind in ("asset", "liability"):
+                if kind_hint and kind_hint != kind:
+                    continue
+                candidates += nw.list_items(db, owner, kind)
+            if not candidates:
+                return _err("Nothing saved. There are no assets or liabilities yet. Ask the user to add it "
+                            "in the Finance window first. Do not invent one.")
+            match = match_name(name, candidates)
+            if not match.ok:
+                accounts = fin.list_accounts(db, owner)
+                if match.status == "missing" and match_name(name, accounts).ok:
+                    return _err(f"Nothing saved. '{name}' is an account; its balance comes from its "
+                                "transactions. Use add_transaction or add_transfer instead.")
+                labelled = [f"{c['name']} ({c['kind']})" for c in candidates if c["name"] in match.options]
+                if match.status == "ambiguous":
+                    return _err(f"Nothing saved. '{name}' matches more than one item: {', '.join(labelled)}. "
+                                "Ask the user which they mean.")
+                return _err(f"Nothing saved. No asset or liability called '{name}'. Existing: "
+                            f"{', '.join(labelled[:15])}. Ask the user which one, or to add it in the "
+                            "Finance window. Do not create one.")
+            item = match.item
+            previous = nw.latest_valuation(db, owner, item["kind"], item["id"])
+            before = (previous.value_pence, previous.date.isoformat()) if previous else None
+            snap = nw.set_valuation(db, owner, item["kind"], item["id"], value=_amount_text(value), on=day,
+                                    note=str(_first(args, "note", default="")))
+            saved = nw.valuation_to_dict(snap)
+            worth = nw.net_worth(db, owner)["net_worth_pence"]
+            db.commit()
+    except fin.FinanceError as exc:
+        return _err(f"Nothing saved. {exc}")
+    except Exception as exc:  # pragma: no cover - unexpected storage failure
+        logger.exception("update_valuation failed")
+        return _err(f"Nothing saved: {exc}")
+    what = "value" if item["kind"] == "asset" else "balance owed"
+    text = f"Updated {item['name']} {what} to {format_pence(saved['value_pence'])} on {saved['date']}"
+    if before:
+        text += f" (was {format_pence(before[0])} on {before[1]})"
+    text += f". Net worth is now {format_pence(worth)}."
+    return {"response": text, "data": saved, "exit_code": 0}
+
+
+# ── manage_recurring ────────────────────────────────────────────────────
+
+
+def _recurring_line(r: dict, accounts: dict) -> str:
+    sign = "+" if r["direction"] == "in" else "-"
+    return (f"- {r['name']}: {sign}{format_pence(r['amount_pence'])} {r['frequency_label'].lower()} from "
+            f"{accounts.get(r['account_id'], '?')}, next due {r.get('next_due') or 'none'}")
+
+
+async def do_manage_recurring(content, owner: Optional[str] = None) -> Dict:
+    """List, add, confirm or skip recurring payments and income."""
+    from src.finance import recurring as rec
+    from src.finance.models import FinanceRecurring
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return _err("Invalid JSON arguments")
+    action = str(_first(args, "action", default="list")).strip().lower()
+    action = {"create": "add", "new": "add", "paid": "confirm", "done": "confirm", "record": "confirm",
+              "show": "list", "view": "list"}.get(action, action)
+    if action not in ("list", "add", "confirm", "skip"):
+        return _err("action must be list, add, confirm or skip")
+    try:
+        owner = fin.resolve_owner(owner)
+        with _session() as db:
+            accounts = {a["id"]: a["name"] for a in fin.list_accounts(db, owner, include_archived=True)}
+            if action == "list":
+                items = rec.list_recurring(db, owner)
+                if not items:
+                    return {"response": "No recurring items yet.", "data": {"recurring": []}, "exit_code": 0}
+                return {"response": "Recurring items:\n" + "\n".join(_recurring_line(r, accounts) for r in items),
+                        "data": {"recurring": items}, "exit_code": 0}
+
+            if action == "add":
+                name = _first(args, "name")
+                amount = _first(args, "amount")
+                if name is None or amount is None:
+                    return _err("Nothing saved. A recurring item needs a name and an amount. Ask the user.")
+                if _first(args, "account") is None:
+                    active = fin.list_accounts(db, owner)
+                    if len(active) != 1:
+                        return _err("Nothing saved. Which account does it come from or go into? Existing: "
+                                    f"{', '.join(a['name'] for a in active) or 'none yet'}. Ask the user.")
+                    account = active[0]
+                else:
+                    account, error = _resolve(db, owner, "account", args["account"])
+                    if error:
+                        return error
+                category_id = None
+                if _first(args, "category") is not None:
+                    category, error = _resolve(db, owner, "category", args["category"])
+                    if error:
+                        return error
+                    category_id = category["id"]
+                liability_id = None
+                if _first(args, "towards") is not None:
+                    from src.finance import networth as nw
+
+                    match = match_name(args["towards"], nw.list_items(db, owner, "liability"))
+                    if not match.ok:
+                        return _err(f"Nothing saved. '{args['towards']}' doesn't match one debt "
+                                    f"({', '.join(match.options[:15]) or 'none yet'}). Ask the user.")
+                    liability_id = match.item["id"]
+                item = rec.create_recurring(
+                    db, owner, name=name, account_id=account["id"], amount=_amount_text(amount),
+                    direction=_direction(args), frequency=_first(args, "frequency", default="monthly"),
+                    next_due=_parse_day(_first(args, "next_due", "date"), field="next due date"),
+                    end_date=_first(args, "end_date"), category_id=category_id, liability_id=liability_id)
+                saved = rec.recurring_to_dict(item)
+                db.commit()
+                return {"response": f"Recurring item added: {_recurring_line({**saved, 'next_due': saved['anchor_date']}, accounts)[2:]}. "
+                                    "It will show as expected on each due date; nothing is recorded until confirmed.",
+                        "data": saved, "exit_code": 0}
+
+            # confirm / skip: find the item and its occurrence.
+            items = [rec.recurring_to_dict(i) for i in db.query(FinanceRecurring).filter(
+                FinanceRecurring.owner == owner, FinanceRecurring.archived.is_(False))]
+            name = _first(args, "name")
+            if name is None:
+                return _err(f"Nothing saved. Which recurring item? Existing: "
+                            f"{', '.join(i['name'] for i in items) or 'none yet'}. Ask the user.")
+            match = match_name(name, items)
+            if not match.ok:
+                word = "matches more than one" if match.status == "ambiguous" else "doesn't match any"
+                return _err(f"Nothing saved. '{name}' {word} recurring item: "
+                            f"{', '.join(match.options[:15]) or 'none yet'}. Ask the user which one.")
+            item = rec.get_recurring(db, owner, match.item["id"])
+            today = _today()
+            pending = [o for o in rec.occurrences(db, owner, today - timedelta(days=rec.LOOKBACK_DAYS),
+                                                  today + timedelta(days=31), today=today, items=[item])
+                       if o.status in ("expected", "overdue")]
+            if _first(args, "due_date") is not None:
+                due = _parse_day(args["due_date"], field="due date")
+            elif pending:
+                due = pending[0].due  # the oldest one still waiting
+            else:
+                return _err(f"Nothing saved. {item.name} has nothing due to {action}.")
+            if action == "skip":
+                rec.skip(db, owner, item.id, due)
+                db.commit()
+                return {"response": f"Skipped {item.name} due {due.isoformat()}.", "data": {"due_date": due.isoformat()},
+                        "exit_code": 0}
+            candidates = rec.match_candidates(db, owner, item, due)
+            if candidates and _first(args, "amount") is None:
+                tx = candidates[0]
+                rec.match(db, owner, item.id, due, tx["id"])
+                db.commit()
+                return {"response": f"Confirmed {item.name} due {due.isoformat()} by matching the transaction "
+                                    f"already recorded on {tx['date']} ({format_pence(tx['amount_pence'])}, "
+                                    f"\"{tx['description']}\"). No new transaction was added.",
+                        "data": {"due_date": due.isoformat(), "transaction_id": tx["id"]}, "exit_code": 0}
+            amount = _first(args, "amount")
+            event = rec.confirm(db, owner, item.id, due, on=_first(args, "date"),
+                                amount=_amount_text(amount) if amount is not None else None)
+            tx_amount = fin._get_transaction(db, owner, event.transaction_id).amount_pence
+            db.commit()
+            return {"response": f"Confirmed {item.name} due {due.isoformat()}: recorded "
+                                f"{format_pence(tx_amount)} on {accounts.get(item.account_id, '?')}.",
+                    "data": {"due_date": due.isoformat(), "transaction_id": event.transaction_id}, "exit_code": 0}
+    except fin.FinanceError as exc:
+        return _err(f"Nothing saved. {exc}")
+    except Exception as exc:  # pragma: no cover - unexpected storage failure
+        logger.exception("manage_recurring failed")
+        return _err(f"Nothing saved: {exc}")
+
+
+# ── set_budget ──────────────────────────────────────────────────────────
+
+
+async def do_set_budget(content, owner: Optional[str] = None) -> Dict:
+    """Set or remove a monthly budget for a spending category."""
+    from src.finance import budgets as bud
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return _err("Invalid JSON arguments")
+    try:
+        owner = fin.resolve_owner(owner)
+        category_query = _first(args, "category", "name")
+        if category_query is None:
+            return _err("Nothing saved. Which category is the budget for? Ask the user.")
+        raw = _first(args, "amount", "limit", "budget")
+        if raw is None:
+            return _err("Nothing saved. What should the monthly budget be? Ask the user.")
+        remove = str(raw).strip().lower() in ("none", "remove", "delete", "off", "no budget")
+        with _session() as db:
+            categories = [c for c in fin.list_categories(db, owner) if c["kind"] == "expense"]
+            match = match_name(category_query, categories)
+            if not match.ok:
+                shown = ", ".join(match.options[:20])
+                if match.status == "ambiguous":
+                    return _err(f"Nothing saved. '{category_query}' matches more than one category: {shown}. "
+                                "Ask the user which one.")
+                return _err(f"Nothing saved. No spending category called '{category_query}'. Categories: {shown}. "
+                            "Ask the user which one. Do not create a category.")
+            category = match.item
+            row = bud.set_budget(db, owner, category["id"], None if remove else _amount_text(raw),
+                                 month=_first(args, "month"))
+            saved = {"category": category["name"], "month": row.month.isoformat()[:7], "limit_pence": row.limit_pence}
+            db.commit()
+    except fin.FinanceError as exc:
+        return _err(f"Nothing saved. {exc}")
+    except Exception as exc:  # pragma: no cover - unexpected storage failure
+        logger.exception("set_budget failed")
+        return _err(f"Nothing saved: {exc}")
+    if saved["limit_pence"] is None:
+        text = f"Removed the {saved['category']} budget from {saved['month']} onwards."
+    else:
+        text = (f"{saved['category']} budget set to {format_pence(saved['limit_pence'])} a month from "
+                f"{saved['month']} onwards (no rollover).")
+    return {"response": text, "data": saved, "exit_code": 0}

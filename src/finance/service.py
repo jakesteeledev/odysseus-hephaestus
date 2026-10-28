@@ -108,6 +108,16 @@ def _clean_text(value, *, field: str, max_len: int, required: bool = False) -> s
     return text
 
 
+def _today_for_owner() -> date:
+    """Today in the user's timezone (falls back to the server's date)."""
+    try:
+        from src.user_time import now_user_local
+
+        return now_user_local().date()
+    except Exception:  # pragma: no cover - timezone helper unavailable
+        return date.today()
+
+
 def parse_date(value, *, field: str = "date") -> date:
     """Accept a ``date``/``datetime`` or an ISO ``YYYY-MM-DD`` string."""
     if isinstance(value, datetime):
@@ -270,19 +280,22 @@ def delete_account(db: Session, owner, account_id) -> None:
     db.flush()
 
 
-def account_balances(db: Session, owner, account_ids: Optional[Iterable[str]] = None) -> dict:
-    """Map account id -> current balance in pence (opening balance + transactions).
+def account_balances(db: Session, owner, account_ids: Optional[Iterable[str]] = None,
+                     *, as_of: Optional[date] = None) -> dict:
+    """Map account id -> balance in pence (opening balance + transactions).
 
-    Transfers count here: they move money between accounts.
+    Transfers count here: they move money between accounts. With *as_of*,
+    only transactions dated on or before that day are included.
     """
     owner = _require_owner(owner)
     signed = case((FinanceTransaction.direction == "in", FinanceTransaction.amount_pence),
                   else_=-FinanceTransaction.amount_pence)
+    join_on = [FinanceTransaction.account_id == FinanceAccount.id, FinanceTransaction.owner == owner]
+    if as_of is not None:
+        join_on.append(FinanceTransaction.date <= as_of)
     query = db.query(FinanceAccount.id, FinanceAccount.opening_balance_pence,
                      func.coalesce(func.sum(signed), 0)).outerjoin(
-        FinanceTransaction,
-        and_(FinanceTransaction.account_id == FinanceAccount.id,
-             FinanceTransaction.owner == owner),
+        FinanceTransaction, and_(*join_on),
     ).filter(FinanceAccount.owner == owner).group_by(FinanceAccount.id)
     if account_ids is not None:
         query = query.filter(FinanceAccount.id.in_(list(account_ids)))
@@ -559,6 +572,11 @@ def update_transaction(db: Session, owner, transaction_id, **changes) -> Finance
     if changes.get("notes") is not None:
         tx.notes = _clean_text(changes["notes"], field="notes", max_len=MAX_NOTES_LEN)
     db.flush()
+    from src.finance.loans import sync_transaction_payment
+    from src.finance.networth import sync_transaction_contribution
+
+    sync_transaction_contribution(db, owner, tx)
+    sync_transaction_payment(db, owner, tx)
     return tx
 
 
@@ -665,12 +683,21 @@ def list_transactions(db: Session, owner, flt: Optional[TransactionFilter] = Non
             FinanceTransaction.owner == owner, FinanceTransaction.transfer_id.in_(transfer_ids)
         ):
             other_side[(side.transfer_id, side.direction)] = side.account_id
+    from src.finance.loans import payment_links
+    from src.finance.networth import contribution_links
+
+    out_ids = [t.id for t in rows if t.direction == "out"]
+    links = contribution_links(db, owner, out_ids)
+    payments = payment_links(db, owner, out_ids)
     result = []
     for tx in rows:
         counterpart = None
         if tx.transfer_id:
             counterpart = other_side.get((tx.transfer_id, "in" if tx.direction == "out" else "out"))
-        result.append(transaction_to_dict(tx, transfer_account_id=counterpart))
+        row = transaction_to_dict(tx, transfer_account_id=counterpart)
+        row["contribution_asset_id"] = links.get(tx.id)
+        row["payment_liability_id"] = payments.get(tx.id)
+        result.append(row)
     return result
 
 

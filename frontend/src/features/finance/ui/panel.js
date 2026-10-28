@@ -7,19 +7,25 @@
 import { ICONS, esc } from './dom.js';
 
 const TABS = [
-  { id: 'accounts', label: 'Accounts', icon: ICONS.accounts },
+  { id: 'overview', label: 'Overview', icon: ICONS.accounts },
   { id: 'transactions', label: 'Transactions', icon: ICONS.list },
-  { id: 'summary', label: 'Summary', icon: ICONS.summary },
-  { id: 'add', label: 'Add', icon: ICONS.add },
+  { id: 'upcoming', label: 'Upcoming', icon: ICONS.upcoming },
+  { id: 'budgets', label: 'Budgets', icon: ICONS.budgets },
+  { id: 'insights', label: 'Insights', icon: ICONS.summary },
   { id: 'import', label: 'Import', icon: ICONS.upload },
   { id: 'settings', label: 'Settings', icon: ICONS.settings },
 ];
+// "add" is opened from the header button rather than a tab.
+const VIEWS = new Set([...TABS.map((t) => t.id), 'add']);
+// Tab names remembered from v1.
+const RENAMED = { accounts: 'overview', summary: 'insights' };
 const MODAL_ID = 'finance-modal';
 
 export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }) {
   let modal = null;
   let open = false;
-  let tab = TABS.some((t) => t.id === app.lastTab()) ? app.lastTab() : 'accounts';
+  const remembered = RENAMED[app.lastTab()] || app.lastTab();
+  let tab = VIEWS.has(remembered) && remembered !== 'add' ? remembered : 'overview';
   let unsubscribe = null;
   let escHandler = null;
 
@@ -36,6 +42,7 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
         <div class="modal-header">
           <h4><span class="fin-title-icon">${ICONS.finance(14)}</span>Finance</h4>
           <span style="flex:1"></span>
+          <button type="button" class="memory-toolbar-btn fin-add-btn" data-fin-add title="Add money in, money out or a transfer">${ICONS.add()} Add</button>
           <button class="close-btn" id="finance-close" aria-label="Close finance">✖</button>
         </div>
         <div class="memory-tabs fin-tabs" role="tablist">
@@ -48,6 +55,7 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
     modal.querySelector('#finance-close').addEventListener('click', close);
     modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
     modal.querySelectorAll('.fin-tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+    modal.querySelector('[data-fin-add]').addEventListener('click', () => switchTab('add'));
     // Clicks on "Add an account" inside empty states jump to that tab.
     modal.addEventListener('click', (e) => {
       const go = e.target.closest('[data-fin-go]');
@@ -82,9 +90,11 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
       return;
     }
     switch (tab) {
-      case 'accounts': views.accounts.render(el); break;
+      case 'overview': views.overview.render(el); break;
       case 'transactions': views.transactions.render(el); break;
-      case 'summary': views.summary.render(el); break;
+      case 'upcoming': views.upcoming.render(el); break;
+      case 'budgets': views.budgets.render(el); break;
+      case 'insights': views.insights.render(el); break;
       case 'add': views.add(el, () => renderTab()); break;  // stay ready for the next entry
       case 'import': views.import.render(el); break;
       case 'settings': views.settings.render(el); break;
@@ -96,15 +106,22 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
   // and settings hold half-filled forms, so they are not redrawn under the user.
   function onState() {
     if (!open) return;
-    if (!app.state.loaded || ['accounts', 'transactions', 'summary'].includes(tab)) renderTab();
+    if (!app.state.loaded || ['transactions', 'insights'].includes(tab)) renderTab();
+    // The overview holds editors; only redraw it when none is open.
+    else if (tab === 'overview' && !views.overview.isEditing()) renderTab();
+    // Budgets follow the month navigation.
+    else if (tab === 'budgets' && !views.budgets.isEditing()) renderTab();
   }
 
   function switchTab(next) {
-    if (!TABS.some((t) => t.id === next)) return;
+    next = RENAMED[next] || next;
+    if (!VIEWS.has(next)) return;
     tab = next;
-    app.rememberTab(tab);
-    views.accounts.reset();
+    if (tab !== 'add') app.rememberTab(tab);
+    views.overview.reset();
     views.transactions.reset();
+    views.upcoming.reset();
+    views.budgets.reset();
     renderTab();
   }
 
@@ -152,7 +169,7 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
     if (modal) { modal.style.display = 'none'; modal.classList.add('hidden'); }
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
     if (escHandler) { document.removeEventListener('keydown', escHandler); escHandler = null; }
-    views.accounts.reset();
+    views.overview.reset();
     views.transactions.reset();
   }
 

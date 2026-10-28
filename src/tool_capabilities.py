@@ -170,6 +170,9 @@ _register(
         # HEPHAESTUS PATCH: finance writes (gated like notes/calendar writes).
         "add_transaction",
         "add_transfer",
+        "update_valuation",
+        "manage_recurring",
+        "set_budget",
     },
     ToolEffect.WRITE_PRIVATE,
 )
@@ -341,6 +344,7 @@ _PRIVATE_ACTION_READS: Mapping[str, frozenset[str]] = MappingProxyType(
         "manage_documents": frozenset({"list", "read", "view", "open", "get"}),
         "manage_memory": frozenset({"list", "search"}),
         "manage_notes": frozenset({"list", "search", "find", "view"}),
+        "manage_recurring": frozenset({"list"}),  # HEPHAESTUS PATCH
         "manage_research": frozenset({"list", "read", "open", "view", "get"}),
         "manage_session": frozenset({"list", "switch", "open", "select", "view"}),
         "manage_skills": frozenset({"list", "index", "view", "view_ref", "search"}),
@@ -363,6 +367,7 @@ _PRIVATE_ACTION_WRITES: Mapping[str, frozenset[str]] = MappingProxyType(
         "manage_documents": frozenset({"delete", "tidy"}),
         "manage_memory": frozenset({"add", "edit", "delete"}),
         "manage_notes": frozenset({"add", "update", "delete", "toggle_item"}),
+        "manage_recurring": frozenset({"add", "confirm", "skip"}),  # HEPHAESTUS PATCH
         "manage_research": frozenset({"delete"}),
         "manage_session": frozenset(
             {
@@ -426,6 +431,7 @@ _ACTION_DEFAULTS: Mapping[str, str] = MappingProxyType(
         "manage_documents": "list",
         "manage_research": "list",
         "manage_tasks": "list",
+        "manage_recurring": "list",  # HEPHAESTUS PATCH
     }
 )
 

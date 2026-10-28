@@ -1,6 +1,6 @@
 ---
 name: odysseus
-description: Use when the user asks Claude Code to read or write Odysseus data (todos, email, calendar, memory, documents) or to launch/monitor/stop a Cookbook model-serve task through the scoped Claude Agent API. Requires ODYSSEUS_URL and ODYSSEUS_API_TOKEN.
+description: Use when the user asks Claude Code to read or write Odysseus data (todos, email, calendar, memory, documents) or read their finances (net worth, balances, transactions, bills, budgets), or to launch/monitor/stop a Cookbook model-serve task through the scoped Claude Agent API. Requires ODYSSEUS_URL and ODYSSEUS_API_TOKEN.
 ---
 
 # Odysseus
@@ -92,6 +92,39 @@ python3 ~/.claude/skills/odysseus/scripts/odysseus_api.py POST /api/codex/memory
 - `GET /api/codex/calendar/events?start=ISO&end=ISO` — list events in window.
 - `POST /api/codex/calendar/events` — body matches `EventCreate` (`summary`, `dtstart`, `dtend`, `all_day`, `description`, `location`, `calendar_href`, `rrule`, `color`). Requires `calendar:write`.
 - `DELETE /api/codex/calendar/events/{uid}` — delete event by uid (the value returned in the POST response). Requires `calendar:write`.
+
+## Finance (read only)
+
+<!-- HEPHAESTUS PATCH: Odysseus-Hephaestus finance tracker. -->
+
+Requires the `finance:read` scope. There is **no** write access: never try to add or change transactions,
+balances, recurring items or budgets through the API. If the user wants a change, tell them to make it in
+the Odysseus Finance window or ask the Odysseus chat (which has approval-gated finance tools).
+
+Amounts are integer pence in GBP (`12345` = £123.45). Liabilities are positive amounts owed. Transfers between
+the user's own accounts are excluded from income/spending totals and budgets.
+
+- `GET /api/codex/finance/networth?as_of=YYYY-MM-DD` — net worth (assets minus liabilities) with totals and items
+  grouped by type. Credit card balances count as liabilities. `as_of` is optional (history).
+- `GET /api/codex/finance/accounts?include_archived=false` — accounts with current balances.
+- `GET /api/codex/finance/assets` — property, investments, pensions, vehicles with current value
+  (investments/pensions include contributions and gain).
+- `GET /api/codex/finance/liabilities` — mortgages, loans, student loans, BNPL with balance owed and `loan`
+  details (rate, payments with interest/capital split, payoff projection, missed payments).
+- `GET /api/codex/finance/transactions?start=&end=&account_id=&category_id=&q=&limit=100` — newest first,
+  dates inclusive, max 500.
+- `GET /api/codex/finance/summary?year=2026&month=10` — money in, out, net and spending by category.
+- `GET /api/codex/finance/upcoming?days=30` — recurring bills/income due (overdue, expected) and projected
+  month-end balances.
+- `GET /api/codex/finance/budgets?year=&month=` — per-category limit, spent, committed and what is left.
+
+```bash
+python3 ~/.claude/skills/odysseus/scripts/odysseus_api.py GET /api/codex/finance/networth
+python3 ~/.claude/skills/odysseus/scripts/odysseus_api.py GET "/api/codex/finance/upcoming?days=7"
+```
+
+Finance data is highly personal: only fetch what the user's question needs, and don't paste raw transaction
+lists into files or other services unless they ask.
 
 ## Documents
 
