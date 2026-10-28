@@ -6,6 +6,7 @@
 
 import { dayLabel, formatPence, isoDay, penceToInput } from '../domain/money.js';
 import { amountHtml, balanceHtml, emptyHtml, esc, optionsHtml } from './dom.js';
+import { shareNote } from './ownerChips.js';
 
 const FREQUENCIES = [
   { value: 'weekly', label: 'Weekly' },
@@ -45,7 +46,7 @@ export function createUpcomingView({ app, ui, now }) {
       <div class="memory-item fin-row fin-static-row fin-occurrence${resolved ? ' fin-row-skipped' : ''}">
         <div class="fin-row-main">
           <span class="memory-item-title">${esc(row.name)}</span>
-          <span class="fin-row-sub">${esc(dayLabel(row.due_date))} · ${esc(accountName(row.account_id))} · ${esc(row.frequency_label.toLowerCase())}</span>
+          <span class="fin-row-sub">${esc(dayLabel(row.due_date))} · ${esc(accountName(row.account_id))} · ${esc(row.frequency_label.toLowerCase())}${esc(shareNote(app, row.amount_pence, row.share_pence ?? row.amount_pence, formatPence))}</span>
           <div class="fin-occurrence-actions">
             ${resolved
               ? `<button type="button" class="memory-toolbar-btn" data-occ-action="undo" data-id="${esc(row.recurring_id)}" data-due="${esc(row.due_date)}">Undo</button>`
@@ -55,7 +56,7 @@ export function createUpcomingView({ app, ui, now }) {
                  <button type="button" class="memory-toolbar-btn" data-occ-action="skip" data-id="${esc(row.recurring_id)}" data-due="${esc(row.due_date)}">Skip</button>`}
           </div>
         </div>
-        ${amountHtml(row.amount_pence, row.direction)}
+        ${amountHtml(row.share_pence ?? row.amount_pence, row.direction)}
         ${badge}
       </div>`;
   }
@@ -114,7 +115,9 @@ export function createUpcomingView({ app, ui, now }) {
   }
 
   function itemsHtml() {
-    const rows = items.map((r) => (editing === r.id
+    // With a person chosen, only items paid from or into their accounts.
+    const shown = items.filter((r) => app.ownsIt(app.accountById(r.account_id)?.owner_ids));
+    const rows = shown.map((r) => (editing === r.id
       ? `<div class="memory-item fin-edit-card">${formHtml(r)}</div>`
       : `<div class="memory-item fin-row${r.archived ? ' fin-archived' : ''}" data-recurring-id="${esc(r.id)}" role="button" tabindex="0">
           <div class="fin-row-main"><span class="memory-item-title">${esc(r.name)}</span>
@@ -170,8 +173,8 @@ export function createUpcomingView({ app, ui, now }) {
         <div class="memory-list fin-list">${data.projected_balances.map((p) => `
           <div class="memory-item fin-row fin-static-row">
             <div class="fin-row-main"><span class="memory-item-title">${esc(p.name)}</span>
-              <span class="fin-row-sub">now ${esc(formatPence(p.balance_pence))} · expected ${p.expected_pence >= 0 ? '+' : ''}${esc(formatPence(p.expected_pence))}</span></div>
-            ${balanceHtml(p.projected_pence)}
+              <span class="fin-row-sub">now ${esc(formatPence(p.balance_pence))} · expected ${p.expected_pence >= 0 ? '+' : ''}${esc(formatPence(p.expected_pence))}${esc(shareNote(app, p.projected_pence, p.projected_share_pence ?? p.projected_pence, formatPence))}</span></div>
+            ${balanceHtml(p.projected_share_pence ?? p.projected_pence)}
           </div>`).join('')}</div>
       </div>` : ''}
       ${itemsHtml()}

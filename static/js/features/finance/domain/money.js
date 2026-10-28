@@ -28,6 +28,28 @@ export function formatPence(pence) {
   return `${sign}£${pounds}.${String(abs % 100).padStart(2, '0')}`;
 }
 
+/**
+ * Split pence into equal shares that add up exactly; leftover pence go to
+ * the first share. Mirrors the server (src/finance/members.split_pence).
+ */
+export function splitPence(amount, count) {
+  if (count <= 0) return [];
+  const value = Math.trunc(Number(amount) || 0);
+  const sign = value < 0 ? -1 : 1;
+  const abs = Math.abs(value);
+  const base = Math.floor(abs / count);
+  const shares = new Array(count).fill(base);
+  shares[0] += abs - base * count;
+  return shares.map((s) => (s === 0 ? 0 : sign * s));
+}
+
+/** A member's share of an amount owned by `ownerIds` (in split order); the whole amount with no member. */
+export function sharePence(amount, ownerIds, memberId) {
+  if (!memberId) return Math.trunc(Number(amount) || 0);
+  const index = (ownerIds || []).indexOf(memberId);
+  return index < 0 ? 0 : splitPence(amount, ownerIds.length)[index];
+}
+
 /** Plain pounds for form fields: 1250 -> "12.50". */
 export function penceToInput(pence) {
   const value = Math.trunc(Number(pence) || 0);

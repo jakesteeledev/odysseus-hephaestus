@@ -6,7 +6,7 @@
 import { ACCOUNT_TYPE_LABELS, formatPence } from '../domain/money.js';
 import { CONTRIBUTION_TYPES, typeLabel } from '../domain/items.js';
 import { avatarHtml, balanceHtml, emptyHtml, esc } from './dom.js';
-import { hasHousehold, ownersHtml } from './ownerChips.js';
+import { hasHousehold, ownersHtml, possessive, shareNote } from './ownerChips.js';
 
 export function createOverviewView({ app, accountsView, itemView }) {
   let editing = null; // { kind, id } or { kind, id: 'new' }
@@ -28,7 +28,7 @@ export function createOverviewView({ app, accountsView, itemView }) {
       if (item.owner_warning) parts.push('owners differ from the property');
     }
     if (item.archived) parts.push('archived');
-    return parts.join(' · ');
+    return parts.join(' · ') + shareNote(app, item.full_value_pence ?? item.value_pence, item.value_pence, formatPence);
   }
 
   function groupHtml(group, kind) {
@@ -61,7 +61,8 @@ export function createOverviewView({ app, accountsView, itemView }) {
     const total = kind === 'asset' ? worth.assets_total_pence : worth.liabilities_total_pence;
     // Items with no value yet are not in the net worth groups; list them so they can be filled in.
     const shown = new Set(groups.flatMap((g) => g.items.filter((i) => i.kind !== 'account').map((i) => i.id)));
-    const pending = (kind === 'asset' ? app.state.assets : app.state.liabilities).filter((i) => !i.archived && !shown.has(i.id));
+    const pending = (kind === 'asset' ? app.state.assets : app.state.liabilities)
+      .filter((i) => !i.archived && !shown.has(i.id) && app.ownsIt(i.owner_ids));
     const pendingGroup = pending.length ? groupHtml({ label: 'Not counted yet (no value)', total_pence: 0, items: pending }, kind) : '';
     return `
       <div class="admin-card fin-card">
@@ -81,6 +82,8 @@ export function createOverviewView({ app, accountsView, itemView }) {
 
   /** Each member's net worth (their share of everything they own), with the household total. */
   function breakdownHtml(worth) {
+    const person = app.personMember();
+    if (person) return `<div class="fin-hint">${esc(possessive(person))} share: joint items are split equally between their owners. Choose Household to see everything.</div>`;
     if (!hasHousehold(app) || !worth.by_member?.length) return '';
     return `
       <div class="fin-members-breakdown" aria-label="Net worth by person">
@@ -97,12 +100,18 @@ export function createOverviewView({ app, accountsView, itemView }) {
       <div class="fin-hint">Joint items count equally towards each owner.</div>`;
   }
 
+  function headline() {
+    const person = app.personMember();
+    if (person) return `${possessive(person)} net worth`;
+    return hasHousehold(app) ? 'Household net worth' : 'Net worth';
+  }
+
   function render(container) {
     const worth = app.state.networth;
     if (!worth) { container.innerHTML = emptyHtml('Loading…'); return; }
     container.innerHTML = `
       <div class="admin-card fin-card fin-headline-card">
-        <span class="fin-stat-label">Net worth</span>
+        <span class="fin-stat-label">${esc(headline())}</span>
         <span class="fin-headline">${balanceHtml(worth.net_worth_pence)}</span>
         <div class="fin-stats">
           <div class="fin-stat"><span class="fin-stat-label">Assets</span>${balanceHtml(worth.assets_total_pence)}</div>

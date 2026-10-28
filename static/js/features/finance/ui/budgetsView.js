@@ -6,6 +6,7 @@
 
 import { formatPence, monthLabel, penceToInput } from '../domain/money.js';
 import { categoryDot, emptyHtml, esc, optionsHtml } from './dom.js';
+import { possessive } from './ownerChips.js';
 
 export function createBudgetsView({ app, ui, monthNav }) {
   let status = null;
@@ -46,6 +47,8 @@ export function createBudgetsView({ app, ui, monthNav }) {
     const committed = row.committed_pence
       ? ` · ${formatPence(row.committed_pence)} expected, then ${formatPence(row.left_after_committed_pence)}` : '';
     const label = { over: 'Over budget', warning: 'Close to the limit', ok: '' }[row.state];
+    const person = app.personMember();
+    const mine = person ? ` · ${possessive(person)} share ${formatPence(row.person_spent_pence)}` : '';
     return `
       <div class="memory-item fin-row fin-budget-row" data-budget="${esc(row.category_id)}" role="button" tabindex="0">
         ${categoryDot(row.color)}
@@ -55,7 +58,7 @@ export function createBudgetsView({ app, ui, monthNav }) {
             <span class="fin-amount">${esc(formatPence(row.spent_pence))} <span class="fin-row-sub">of ${esc(formatPence(row.limit_pence))}</span></span>
           </div>
           ${barHtml(row)}
-          <span class="fin-row-sub">${esc(left)}${esc(committed)}${label ? ` · <span class="fin-budget-label fin-budget-${row.state}">${esc(label)}</span>` : ''}</span>
+          <span class="fin-row-sub">${esc(left)}${esc(committed)}${esc(mine)}${label ? ` · <span class="fin-budget-label fin-budget-${row.state}">${esc(label)}</span>` : ''}</span>
         </div>
       </div>`;
   }
@@ -92,6 +95,7 @@ export function createBudgetsView({ app, ui, monthNav }) {
       return;
     }
     const rows = status.budgets;
+    const person = app.personMember();
     container.innerHTML = `
       <div class="admin-card fin-card">
         ${head}
@@ -101,7 +105,9 @@ export function createBudgetsView({ app, ui, monthNav }) {
           <div class="fin-stat"><span class="fin-stat-label">Budgeted</span><span class="fin-amount">${esc(formatPence(status.total_limit_pence))}</span></div>
           <div class="fin-stat"><span class="fin-stat-label">Spent</span><span class="fin-amount">${esc(formatPence(status.total_spent_pence))}</span></div>
           <div class="fin-stat"><span class="fin-stat-label">${status.is_past ? 'Difference' : 'Left'}</span><span class="fin-amount">${esc(formatPence(status.total_limit_pence - status.total_spent_pence))}</span></div>
+          ${person ? `<div class="fin-stat"><span class="fin-stat-label">${esc(possessive(person))} share</span><span class="fin-amount">${esc(formatPence(status.total_person_spent_pence))}</span></div>` : ''}
         </div>` : ''}
+        ${person ? `<div class="fin-hint">Budgets are for the whole household. ${esc(possessive(person))} share is what ${person.is_primary ? 'you' : esc(person.name)} spent from ${person.is_primary ? 'your' : 'their'} accounts, with joint accounts split equally.</div>` : ''}
         <div class="fin-card-head"><h2 class="fin-card-title">Budgets</h2><span style="flex:1"></span>
           <button type="button" class="memory-toolbar-btn" data-action="new-budget">+ Add budget</button></div>
         ${editing === 'new' ? `<div class="memory-item fin-edit-card">${formHtml(null)}</div>` : ''}

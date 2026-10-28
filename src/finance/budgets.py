@@ -92,21 +92,31 @@ def limits_for_month(db: Session, owner: str, start: date) -> dict:
     return {cid: limit for cid, limit in latest.items() if limit is not None}
 
 
-def _spent_by_category(db: Session, owner: str, start: date, end: date) -> dict:
-    rows = db.query(FinanceTransaction.category_id, func.sum(FinanceTransaction.amount_pence)).filter(
+def _spent_by_category(db: Session, owner: str, start: date, end: date, person: Optional[str] = None,
+                       owners: Optional[dict] = None) -> dict:
+    """Map category id -> spending; with *person*, only their share."""
+    from src.finance.people import account_owners, shared_totals
+
+    rows = db.query(FinanceTransaction.category_id, FinanceTransaction.account_id,
+                    func.sum(FinanceTransaction.amount_pence), func.count(FinanceTransaction.id)).filter(
         FinanceTransaction.owner == owner, FinanceTransaction.direction == "out",
         FinanceTransaction.transfer_id.is_(None), FinanceTransaction.date >= start,
-        FinanceTransaction.date < end).group_by(FinanceTransaction.category_id).all()
-    return {cid: int(total or 0) for cid, total in rows}
+        FinanceTransaction.date < end).group_by(FinanceTransaction.category_id, FinanceTransaction.account_id).all()
+    owners = owners if owners is not None else account_owners(db, owner)
+    return {cid: total for cid, (total, _count) in shared_totals(rows, owners, person).items()}
 
 
-def budget_status(db: Session, owner, *, year=None, month=None, today: Optional[date] = None) -> dict:
+def budget_status(db: Session, owner, *, year=None, month=None, today: Optional[date] = None,
+                  person: Optional[str] = None) -> dict:
+    """Budgets are for the whole household. With *person*, each row also has
+    ``person_spent_pence``: that member's share of the household spending."""
     owner = _require_owner(owner)
     start = _month(year, month)
     _, end = month_range(start.year, start.month)
     today = today or _today_for_owner()
     limits = limits_for_month(db, owner, start)
     spent = _spent_by_category(db, owner, start, end)
+    person_spent = _spent_by_category(db, owner, start, end, person) if person else spent
     committed: dict = {}
     if end > today:  # current or future month
         from src.finance.recurring import committed_out
@@ -131,6 +141,7 @@ def budget_status(db: Session, owner, *, year=None, month=None, today: Optional[
             "limit_pence": limit, "spent_pence": used, "committed_pence": planned,
             "remaining_pence": limit - used, "left_after_committed_pence": limit - used - planned,
             "percent_spent": round(100 * used / limit) if limit else (100 if used else 0), "state": state,
+            "person_spent_pence": person_spent.get(cid, 0),
         })
     rows.sort(key=lambda r: ({"over": 0, "warning": 1, "ok": 2}[r["state"]], r["name"].lower()))
     budgeted = set(limits)
@@ -142,4 +153,7 @@ def budget_status(db: Session, owner, *, year=None, month=None, today: Optional[
         "total_spent_pence": sum(r["spent_pence"] for r in rows),
         "total_committed_pence": sum(r["committed_pence"] for r in rows),
         "unbudgeted_spent_pence": unbudgeted,
+        "person": person,
+        "total_person_spent_pence": sum(r["person_spent_pence"] for r in rows),
+        "unbudgeted_person_spent_pence": sum(v for cid, v in person_spent.items() if cid not in budgeted),
     }

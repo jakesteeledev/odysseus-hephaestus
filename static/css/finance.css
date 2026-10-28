@@ -198,3 +198,15 @@
 .fin-members-breakdown { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
 .fin-member-worth { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .fin-member-worth .fin-row-main { flex: 1; min-width: 0; }
+/* v3: the Household / person switcher, and one line per member in charts */
+.fin-person-slot { flex-shrink: 0; }
+.fin-person-bar { display: flex; gap: 6px; padding-top: 8px; overflow-x: auto; scrollbar-width: none; }
+.fin-person-bar::-webkit-scrollbar { display: none; }
+.fin-person-bar .fin-owner-chip { flex-shrink: 0; white-space: nowrap; }
+.fin-person-bar .fin-owner-chip:first-child { padding-left: 10px; }
+.fin-member-line { color: var(--fin-color, var(--fg)); }
+.fin-chart-dash-1 { stroke-dasharray: 6 4; }
+.fin-chart-dash-2 { stroke-dasharray: 2 3; }
+.fin-chart-dash-3 { stroke-dasharray: 8 3 2 3; }
+.fin-moved { font-size: 11px; opacity: 0.8; }
+.fin-legend .fin-avatar { width: 16px; height: 16px; font-size: 7px; }

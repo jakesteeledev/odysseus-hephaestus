@@ -67,3 +67,41 @@ export function sameOwners(a, b) {
   const right = [...(b || [])].sort();
   return left.length === right.length && left.every((id, i) => id === right[i]);
 }
+
+/** "Your" for the primary member, "Sam's" for others; "Household" with no one chosen. */
+export function possessive(member) {
+  if (!member) return 'Household';
+  if (member.is_primary) return 'Your';
+  return `${member.name}${member.name.endsWith('s') ? "'" : "'s"}`;
+}
+
+/**
+ * The Household / person switcher shown above the views. Archived members
+ * are offered only while they are the one being shown.
+ */
+export function personBarHtml(app) {
+  if (!hasHousehold(app)) return '';
+  const current = app.state.person;
+  const members = app.state.members.filter((m) => !m.archived || m.id === current);
+  const chip = (id, inner, label) => `
+    <button type="button" class="fin-owner-chip${id === current ? ' active' : ''}" data-person="${esc(id)}"
+      aria-pressed="${id === current}" title="${esc(label)}">${inner}</button>`;
+  return `<div class="fin-person-bar" role="group" aria-label="Show figures for">
+      ${chip('', '<span>Household</span>', 'Everyone together')}
+      ${members.map((m) => chip(m.id, `${avatarHtml(m, { title: false })}<span>${esc(m.display_name)}</span>`,
+        `${m.display_name}: their share of everything they own`)).join('')}
+    </div>`;
+}
+
+export function wirePersonBar(container, onPick) {
+  container.querySelectorAll('[data-person]').forEach((chip) => chip.addEventListener('click', () => {
+    if (chip.getAttribute('aria-pressed') === 'true') return;
+    onPick(chip.dataset.person);
+  }));
+}
+
+/** " · share of £X" for a joint amount shown at the person's share. */
+export function shareNote(app, fullPence, sharePence, format) {
+  if (!app.state.person || fullPence === sharePence) return '';
+  return ` · share of ${format(fullPence)}`;
+}

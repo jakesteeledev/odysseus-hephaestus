@@ -1,8 +1,10 @@
 /** Accounts overview: active accounts with balances, the total, and account editing. */
 
-import { ACCOUNT_TYPE_LABELS, penceToInput } from '../domain/money.js';
+import { ACCOUNT_TYPE_LABELS, formatPence, penceToInput } from '../domain/money.js';
 import { balanceHtml, emptyHtml, esc, optionsHtml } from './dom.js';
-import { defaultOwnerIds, ownerPickerHtml, ownersHtml, sameOwners, wireOwnerPicker } from './ownerChips.js';
+import {
+  defaultOwnerIds, ownerPickerHtml, ownersHtml, possessive, sameOwners, shareNote, wireOwnerPicker,
+} from './ownerChips.js';
 
 export function createAccountsView({ app, ui }) {
   let showArchived = false;
@@ -45,14 +47,15 @@ export function createAccountsView({ app, ui }) {
   }
 
   function itemHtml(account) {
+    const share = app.shareOf(account.balance_pence, account.owner_ids);
     return `
       <div class="memory-item fin-row fin-account-row${account.archived ? ' fin-archived' : ''}" data-account-id="${esc(account.id)}" role="button" tabindex="0">
         <div class="fin-row-main">
           <span class="memory-item-title">${esc(account.name)}</span>
-          <span class="fin-row-sub">${esc(ACCOUNT_TYPE_LABELS[account.account_type] || account.account_type)}${account.archived ? ' · archived' : ''}</span>
+          <span class="fin-row-sub">${esc(ACCOUNT_TYPE_LABELS[account.account_type] || account.account_type)}${account.archived ? ' · archived' : ''}${esc(shareNote(app, account.balance_pence, share, formatPence))}</span>
         </div>
         ${ownersHtml(app, account.owner_ids)}
-        ${balanceHtml(account.balance_pence)}
+        ${balanceHtml(share)}
       </div>`;
   }
 
@@ -60,8 +63,13 @@ export function createAccountsView({ app, ui }) {
     mounted = container;
     afterSave = opts.afterSave || null;
     const { state } = app;
-    const accounts = state.accounts.filter((a) => showArchived || !a.archived);
-    const archivedCount = state.accounts.filter((a) => a.archived).length;
+    // With a person chosen, only their accounts are listed, at their share.
+    const visible = state.accounts.filter((a) => app.ownsIt(a.owner_ids));
+    const accounts = visible.filter((a) => showArchived || !a.archived);
+    const archivedCount = visible.filter((a) => a.archived).length;
+    const active = visible.filter((a) => !a.archived);
+    const person = app.personMember();
+    const total = person ? active.reduce((sum, a) => sum + app.shareOf(a.balance_pence, a.owner_ids), 0) : state.totalPence;
     const rows = [];
     for (const account of accounts) {
       rows.push(editing === account.id ? `<div class="memory-item fin-edit-card">${formHtml(account)}</div>` : itemHtml(account));
@@ -75,12 +83,14 @@ export function createAccountsView({ app, ui }) {
         </div>
         ${editing === 'new' ? `<div class="memory-item fin-edit-card">${formHtml(null)}</div>` : ''}
         <div class="memory-list fin-list">
-          ${rows.join('') || (editing === 'new' ? '' : emptyHtml('No accounts yet. Add your current account, savings, credit cards or cash to get started.'))}
+          ${rows.join('') || (editing === 'new' ? '' : emptyHtml(person && state.accounts.length
+            ? `${possessive(person)} accounts will show here once you make them an owner of one.`
+            : 'No accounts yet. Add your current account, savings, credit cards or cash to get started.'))}
         </div>
-        ${state.accounts.some((a) => !a.archived) ? `
+        ${active.length ? `
         <div class="fin-total-row">
-          <span>Total across active accounts</span>
-          ${balanceHtml(state.totalPence)}
+          <span>${person ? `${esc(possessive(person))} share of active accounts` : 'Total across active accounts'}</span>
+          ${balanceHtml(total)}
         </div>` : ''}
         ${archivedCount ? `<button type="button" class="memory-toolbar-btn fin-link-btn" data-action="toggle-archived">${showArchived ? 'Hide' : 'Show'} archived (${archivedCount})</button>` : ''}
       </div>`;

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addMonths, formatDirected, formatPence, monthBounds, monthLabel, parsePence, penceToInput,
+  addMonths, formatDirected, formatPence, monthBounds, monthLabel, parsePence, penceToInput, sharePence, splitPence,
 } from '../frontend/src/features/finance/domain/money.js';
 import { guessMapping, looksLikeHeader, sniffCsv, splitCsvLine } from '../frontend/src/features/finance/domain/csvHeader.js';
 
@@ -67,4 +67,19 @@ test('chart helpers: compact axis money, clean ticks and month labels', async ()
   assert.deepEqual(niceTicks(0, 0).slice(0, 1), [0]);
   assert.equal(monthShort('2026-10'), 'Oct');
   assert.equal(monthShort('2027-01', true), 'Jan 27');
+});
+
+test('splitting pence between owners matches the server', () => {
+  assert.deepEqual(splitPence(30001, 2), [15001, 15000]);
+  assert.deepEqual(splitPence(1001, 3), [335, 333, 333]);
+  assert.deepEqual(splitPence(-1001, 3), [-335, -333, -333]);
+  assert.deepEqual(splitPence(2, 3), [2, 0, 0]);
+  assert.deepEqual(splitPence(500, 1), [500]);
+  for (let amount = -40; amount <= 40; amount += 1) {
+    for (let count = 1; count <= 5; count += 1) assert.equal(splitPence(amount, count).reduce((a, b) => a + b, 0), amount);
+  }
+  assert.equal(sharePence(1001, ['a', 'b', 'c'], 'a'), 335);
+  assert.equal(sharePence(1001, ['a', 'b', 'c'], 'c'), 333);
+  assert.equal(sharePence(1001, ['a', 'b'], 'z'), 0);
+  assert.equal(sharePence(1001, ['a', 'b'], ''), 1001);
 });

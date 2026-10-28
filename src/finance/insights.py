@@ -7,7 +7,7 @@ own accounts are excluded from income and spending, as everywhere else.
 from __future__ import annotations
 
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from sqlalchemy import func
@@ -61,8 +61,13 @@ def _month_count(db: Session, owner: str, range_key: str, today: date) -> int:
     return max(1, min(count, MAX_MONTHS))
 
 
-def net_worth_history(db: Session, owner, *, range_key: str = "1y", today: Optional[date] = None) -> dict:
-    """Net worth, assets and liabilities at each month end (today for this month)."""
+def net_worth_history(db: Session, owner, *, range_key: str = "1y", today: Optional[date] = None,
+                      person: Optional[str] = None) -> dict:
+    """Net worth, assets and liabilities at each month end (today for this month).
+
+    With *person*, the figures are their share. For the household, each
+    point also has ``by_member``: member id -> net worth, for one line each.
+    """
     from src.finance.networth import net_worth
 
     owner = _require_owner(owner)
@@ -70,42 +75,59 @@ def net_worth_history(db: Session, owner, *, range_key: str = "1y", today: Optio
     points = []
     for year, month0 in _months_back(today, _month_count(db, owner, range_key, today)):
         as_of = min(_month_end(year, month0 + 1), today)
-        worth = net_worth(db, owner, as_of=as_of)
-        points.append({
+        worth = net_worth(db, owner, as_of=as_of, person=person)
+        point = {
             "month": f"{year}-{month0 + 1:02d}", "as_of": as_of.isoformat(),
             "net_worth_pence": worth["net_worth_pence"], "assets_pence": worth["assets_total_pence"],
             "liabilities_pence": worth["liabilities_total_pence"],
-        })
-    return {"range": range_key, "points": points}
+        }
+        if person is None:
+            point["by_member"] = {row["member"]["id"]: row["net_worth_pence"] for row in worth.get("by_member", [])}
+        points.append(point)
+    return {"range": range_key, "person": person, "points": points}
 
 
 def monthly_totals(db: Session, owner, *, range_key: str = "1y", category_id: Optional[str] = None,
-                   today: Optional[date] = None) -> dict:
-    """Money in and out per month (zero-filled), and optionally one category's spending."""
+                   today: Optional[date] = None, person: Optional[str] = None) -> dict:
+    """Money in and out per month (zero-filled), and optionally one category's spending.
+
+    With *person*, amounts are their share, and ``moved_in_pence`` /
+    ``moved_out_pence`` are transfers to and from other members.
+    """
+    from src.finance.people import account_owners, moved, shared_totals, transfer_pairs
+
     owner = _require_owner(owner)
     today = today or _today_for_owner()
     months = _months_back(today, _month_count(db, owner, range_key, today))
     first = date(months[0][0], months[0][1] + 1, 1)
+    owners = account_owners(db, owner)
     key = func.strftime("%Y-%m", FinanceTransaction.date)
-    base = db.query(key, FinanceTransaction.direction, func.sum(FinanceTransaction.amount_pence)).filter(
+    base = db.query(key, FinanceTransaction.direction, FinanceTransaction.account_id,
+                    func.sum(FinanceTransaction.amount_pence), func.count(FinanceTransaction.id)).filter(
         FinanceTransaction.owner == owner, FinanceTransaction.transfer_id.is_(None),
         FinanceTransaction.date >= first, FinanceTransaction.date <= today)
+    grouped = base.group_by(key, FinanceTransaction.direction, FinanceTransaction.account_id)
     totals: dict = {}
-    for month, direction, total in base.group_by(key, FinanceTransaction.direction):
-        totals.setdefault(month, {"in": 0, "out": 0})[direction] = int(total or 0)
+    for (month, direction), (total, _count) in shared_totals(
+            (((m, d), a, t, n) for m, d, a, t, n in grouped), owners, person).items():
+        totals.setdefault(month, {"in": 0, "out": 0})[direction] = total
     category_totals: dict = {}
     if category_id:
-        rows = db.query(key, func.sum(FinanceTransaction.amount_pence)).filter(
-            FinanceTransaction.owner == owner, FinanceTransaction.transfer_id.is_(None),
-            FinanceTransaction.direction == "out", FinanceTransaction.category_id == category_id,
-            FinanceTransaction.date >= first, FinanceTransaction.date <= today).group_by(key)
-        category_totals = {month: int(total or 0) for month, total in rows}
+        rows = base.filter(FinanceTransaction.direction == "out", FinanceTransaction.category_id == category_id
+                           ).group_by(key, FinanceTransaction.direction, FinanceTransaction.account_id)
+        category_totals = {month: total for month, (total, _count) in shared_totals(
+            ((m, a, t, n) for m, _d, a, t, n in rows), owners, person).items()}
+    moves = moved(transfer_pairs(db, owner, start=first, end=today + timedelta(days=1)), owners, person,
+                  key=lambda day: day.strftime("%Y-%m"))
     points = []
     for year, month0 in months:
         label = f"{year}-{month0 + 1:02d}"
         row = totals.get(label, {"in": 0, "out": 0})
         point = {"month": label, "in_pence": row["in"], "out_pence": row["out"], "net_pence": row["in"] - row["out"]}
+        if person is not None:
+            move = moves.get(label, {"in": 0, "out": 0})
+            point["moved_in_pence"], point["moved_out_pence"] = move["in"], move["out"]
         if category_id:
             point["category_out_pence"] = category_totals.get(label, 0)
         points.append(point)
-    return {"range": range_key, "category_id": category_id, "points": points}
+    return {"range": range_key, "category_id": category_id, "person": person, "points": points}

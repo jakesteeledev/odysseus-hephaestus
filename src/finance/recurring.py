@@ -431,15 +431,26 @@ def _signed(item: FinanceRecurring) -> int:
     return item.amount_pence if item.direction == "in" else -item.amount_pence
 
 
-def upcoming(db: Session, owner, *, days: int = 30, today: Optional[date] = None) -> dict:
+def upcoming(db: Session, owner, *, days: int = 30, today: Optional[date] = None,
+             person: Optional[str] = None) -> dict:
     """Overdue and next-N-days occurrences with match suggestions, plus
-    projected end-of-month balances per account (expected items only)."""
+    projected end-of-month balances per account (expected items only).
+
+    With *person*, only items and accounts they own are included, and each
+    carries ``share_pence``: their share of the amount or balance.
+    """
+    from src.finance.members import share_of
+    from src.finance.people import account_owners
+
     owner = _require_owner(owner)
     today = today or _today_for_owner()
     horizon = today + timedelta(days=max(1, min(int(days), 366)))
     month_end = date(today.year, today.month, calendar.monthrange(today.year, today.month)[1])
     items = db.query(FinanceRecurring).filter(FinanceRecurring.owner == owner,
                                               FinanceRecurring.archived.is_(False)).all()
+    owners = account_owners(db, owner)
+    if person is not None:
+        items = [i for i in items if person in owners.get(i.account_id, [])]
     occ = occurrences(db, owner, today - timedelta(days=LOOKBACK_DAYS), max(horizon, month_end), today=today,
                       items=items)
     claimed = _claimed_transactions(db, owner)
@@ -448,7 +459,9 @@ def upcoming(db: Session, owner, *, days: int = 30, today: Optional[date] = None
         if o.due > horizon or o.status in ("confirmed", "skipped") and o.due < today:
             continue
         row = {**recurring_to_dict(o.item), "recurring_id": o.item.id, "due_date": o.due.isoformat(),
-               "status": o.status, "transaction_id": o.transaction_id, "matches": []}
+               "status": o.status, "transaction_id": o.transaction_id, "matches": [],
+               "owner_ids": owners.get(o.item.account_id, []),
+               "share_pence": share_of(o.item.amount_pence, owners.get(o.item.account_id, []), person)}
         if o.status in ("expected", "overdue") and o.due <= today + timedelta(days=MATCH_DAYS_BEFORE):
             row["matches"] = match_candidates(db, owner, o.item, o.due, claimed)
         rows.append(row)
@@ -459,14 +472,19 @@ def upcoming(db: Session, owner, *, days: int = 30, today: Optional[date] = None
     balances = account_balances(db, owner, [a.id for a in accounts])
     projected = []
     for account in accounts:
+        if person is not None and person not in owners.get(account.id, []):
+            continue
         pending = sum(_signed(o.item) for o in occ
                       if o.item.account_id == account.id and o.status in ("expected", "overdue") and o.due <= month_end)
         projected.append({"account_id": account.id, "name": account.name,
                           "balance_pence": balances.get(account.id, 0),
                           "expected_pence": pending,
-                          "projected_pence": balances.get(account.id, 0) + pending})
+                          "projected_pence": balances.get(account.id, 0) + pending,
+                          "owner_ids": owners.get(account.id, []),
+                          "projected_share_pence": share_of(balances.get(account.id, 0) + pending,
+                                                            owners.get(account.id, []), person)})
     return {"today": today.isoformat(), "until": horizon.isoformat(), "month_end": month_end.isoformat(),
-            "items": rows, "projected_balances": projected}
+            "items": rows, "projected_balances": projected, "person": person}
 
 
 def committed_out(db: Session, owner: str, start: date, end: date, *, today: Optional[date] = None) -> dict:

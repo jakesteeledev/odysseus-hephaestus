@@ -5,6 +5,7 @@
  */
 
 import { ICONS, esc } from './dom.js';
+import { personBarHtml, wirePersonBar } from './ownerChips.js';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: ICONS.accounts },
@@ -17,6 +18,8 @@ const TABS = [
 ];
 // "add" is opened from the header button rather than a tab.
 const VIEWS = new Set([...TABS.map((t) => t.id), 'add']);
+// Tabs whose figures follow the Household / person switcher.
+const PERSON_TABS = new Set(['overview', 'transactions', 'upcoming', 'budgets', 'insights']);
 // Tab names remembered from v1.
 const RENAMED = { accounts: 'overview', summary: 'insights' };
 const MODAL_ID = 'finance-modal';
@@ -49,6 +52,7 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
           ${TABS.map((t) => `<button class="memory-tab fin-tab" data-tab="${t.id}" role="tab" aria-selected="false">
             <span class="fin-tab-icon">${t.icon()}</span><span class="fin-tab-label">${esc(t.label)}</span></button>`).join('')}
         </div>
+        <div class="fin-person-slot"></div>
         <div class="modal-body fin-body"></div>
       </div>`;
     document.body.appendChild(modal);
@@ -73,10 +77,26 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
     });
   }
 
+  function renderPersonBar() {
+    const slot = modal?.querySelector('.fin-person-slot');
+    if (!slot) return;
+    slot.innerHTML = app.state.loaded && PERSON_TABS.has(tab) ? personBarHtml(app) : '';
+    wirePersonBar(slot, async (id) => {
+      views.overview.reset();
+      views.transactions.reset();
+      views.upcoming.reset();
+      views.budgets.reset();
+      await app.setPerson(id);
+      // The reload redraws the other tabs; Upcoming loads its own data, so draw it again.
+      if (tab === 'upcoming') renderTab();
+    });
+  }
+
   function renderTab() {
     const el = body();
     if (!el) return;
     markTabs();
+    renderPersonBar();
     const { state } = app;
     if (!state.loaded) {
       if (state.error) {

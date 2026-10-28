@@ -1,7 +1,8 @@
 /** Transactions by month with previous/next, filters, search, and tap-to-edit. */
 
-import { dayLabel, monthLabel } from '../domain/money.js';
+import { dayLabel, formatPence, monthLabel } from '../domain/money.js';
 import { ICONS, amountHtml, categoryDot, emptyHtml, esc, optionsHtml } from './dom.js';
+import { possessive, shareNote } from './ownerChips.js';
 
 export function createMonthNav({ app }) {
   function html() {
@@ -31,13 +32,16 @@ export function createTransactionsView({ app, entryForm, monthNav }) {
     if (tx.transfer_id) {
       const other = app.accountById(tx.transfer_account_id);
       label = `${tx.direction === 'out' ? 'Transfer to' : 'Transfer from'} ${other ? other.name : 'account'}`;
+      if (tx.between_members) label += ' · between members';
       dot = `<span class="fin-dot-icon" aria-hidden="true">${ICONS.transfer()}</span>`;
     } else {
       const category = app.categoryById(tx.category_id);
       label = category ? category.name : 'Uncategorised';
       dot = categoryDot(category?.color);
     }
-    const sub = [label, app.state.filters.accountId ? '' : account?.name].filter(Boolean).join(' · ');
+    const share = tx.share_pence ?? tx.amount_pence;
+    const sub = [label, app.state.filters.accountId ? '' : account?.name].filter(Boolean).join(' · ')
+      + shareNote(app, tx.amount_pence, share, formatPence);
     return `
       <div class="memory-item fin-row fin-tx-row" data-tx-id="${esc(tx.id)}" role="button" tabindex="0">
         ${dot}
@@ -45,7 +49,7 @@ export function createTransactionsView({ app, entryForm, monthNav }) {
           <span class="memory-item-title">${esc(tx.description || (tx.transfer_id ? 'Transfer' : '(no description)'))}</span>
           <span class="fin-row-sub">${esc(sub)}${tx.import_batch_id ? ' · imported' : ''}</span>
         </div>
-        ${amountHtml(tx.amount_pence, tx.direction)}
+        ${amountHtml(share, tx.direction)}
       </div>`;
   }
 
@@ -54,7 +58,9 @@ export function createTransactionsView({ app, entryForm, monthNav }) {
     if (!transactions.length) {
       const f = app.state.filters;
       const filtered = f.accountId || f.categoryId || f.direction || f.q;
-      return emptyHtml(filtered ? 'No transactions match these filters.' : 'No transactions this month.');
+      const person = app.personMember();
+      if (filtered) return emptyHtml('No transactions match these filters.');
+      return emptyHtml(person ? `${possessive(person)} accounts have no transactions this month.` : 'No transactions this month.');
     }
     const parts = [];
     let day = null;
@@ -75,7 +81,7 @@ export function createTransactionsView({ app, entryForm, monthNav }) {
   function render(container) {
     const { state } = app;
     const f = state.filters;
-    const accountItems = state.accounts.filter((a) => !a.archived || a.id === f.accountId)
+    const accountItems = state.accounts.filter((a) => (!a.archived || a.id === f.accountId) && app.ownsIt(a.owner_ids))
       .map((a) => ({ value: a.id, label: a.name }));
     const categoryItems = state.categories.map((c) => ({ value: c.id, label: c.name }));
     container.innerHTML = `

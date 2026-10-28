@@ -460,13 +460,14 @@ def setup_finance_routes() -> APIRouter:
         direction: Optional[str] = None,
         q: str = "",
         limit: Optional[int] = None,
+        person: Optional[str] = None,
     ):
         owner = _owner(request)
         with _session() as db:
             start_d, end_d = _range(year, month, start, end)
             flt = fin.TransactionFilter(start=start_d, end=end_d, account_id=account_id or None,
                                         category_id=category_id or None, direction=direction or None,
-                                        search=q[:100])
+                                        search=q[:100], person=_person(db, owner, person))
             if limit is not None:
                 limit = max(1, min(int(limit), 2000))
             return {"transactions": fin.list_transactions(db, owner, flt, limit=limit)}
@@ -505,11 +506,13 @@ def setup_finance_routes() -> APIRouter:
     # Summary and export
 
     @router.get("/summary")
-    def summary(request: Request, year: int, month: int, account_id: Optional[str] = None):
+    def summary(request: Request, year: int, month: int, account_id: Optional[str] = None,
+                person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
             start, end = fin.month_range(year, month)
-            return fin.summary(db, owner, start=start, end=end, account_id=account_id or None)
+            return fin.summary(db, owner, start=start, end=end, account_id=account_id or None,
+                               person=_person(db, owner, person))
 
     @router.get("/export")
     def export(request: Request, start: Optional[str] = None, end: Optional[str] = None,
@@ -622,34 +625,39 @@ def setup_finance_routes() -> APIRouter:
     # Charts (v2 stage 5): specific paths before the generic routes below.
 
     @router.get("/insights/history")
-    def insights_history(request: Request, range: str = "1y"):
+    def insights_history(request: Request, range: str = "1y", person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return insights.net_worth_history(db, owner, range_key=range)
+            return insights.net_worth_history(db, owner, range_key=range, person=_person(db, owner, person))
 
     @router.get("/insights/monthly")
-    def insights_monthly(request: Request, range: str = "1y", category_id: Optional[str] = None):
+    def insights_monthly(request: Request, range: str = "1y", category_id: Optional[str] = None,
+                         person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return insights.monthly_totals(db, owner, range_key=range, category_id=category_id or None)
+            return insights.monthly_totals(db, owner, range_key=range, category_id=category_id or None,
+                                           person=_person(db, owner, person))
 
     @router.get("/insights/spending")
-    def insights_spending(request: Request, start: str, end: str, account_id: Optional[str] = None):
+    def insights_spending(request: Request, start: str, end: str, account_id: Optional[str] = None,
+                          person: Optional[str] = None):
         """Money in/out and spending by category for start..end (both inclusive)."""
         owner = _owner(request)
         with _session() as db:
             start_d, end_d = _range(None, None, start, end)
             if start_d is None or end_d is None or end_d <= start_d:
                 raise fin.FinanceError("choose a start date before the end date")
-            return fin.summary(db, owner, start=start_d, end=end_d, account_id=account_id or None)
+            return fin.summary(db, owner, start=start_d, end=end_d, account_id=account_id or None,
+                               person=_person(db, owner, person))
 
     # Budgets (v2 stage 4): specific paths before the generic routes below.
 
     @router.get("/budgets")
-    def budgets(request: Request, year: Optional[int] = None, month: Optional[int] = None):
+    def budgets(request: Request, year: Optional[int] = None, month: Optional[int] = None,
+                person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return bud.budget_status(db, owner, year=year, month=month)
+            return bud.budget_status(db, owner, year=year, month=month, person=_person(db, owner, person))
 
     @router.put("/budgets/{category_id}")
     def set_budget(category_id: str, body: BudgetSet, request: Request):
@@ -661,10 +669,10 @@ def setup_finance_routes() -> APIRouter:
     # Recurring items (v2 stage 3): specific paths before the generic routes below.
 
     @router.get("/upcoming")
-    def upcoming(request: Request, days: int = 30):
+    def upcoming(request: Request, days: int = 30, person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return rec.upcoming(db, owner, days=days)
+            return rec.upcoming(db, owner, days=days, person=_person(db, owner, person))
 
     @router.get("/recurring")
     def list_recurring(request: Request, include_archived: bool = False):
