@@ -98,5 +98,7 @@ export function createFinanceApi({ request }) {
     createMember: (body) => call('POST', '/members', body),
     updateMember: (id, body) => call('PATCH', `/members/${encodeURIComponent(id)}`, body),
     deleteMember: (id) => call('DELETE', `/members/${encodeURIComponent(id)}`),
+    // `collection` is 'accounts', 'assets' or 'liabilities'.
+    setOwners: (collection, id, memberIds) => call('PUT', `/${collection}/${encodeURIComponent(id)}/owners`, { member_ids: memberIds }),
   };
 }

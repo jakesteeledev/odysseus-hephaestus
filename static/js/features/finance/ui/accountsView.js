@@ -2,6 +2,7 @@
 
 import { ACCOUNT_TYPE_LABELS, penceToInput } from '../domain/money.js';
 import { balanceHtml, emptyHtml, esc, optionsHtml } from './dom.js';
+import { defaultOwnerIds, ownerPickerHtml, ownersHtml, sameOwners, wireOwnerPicker } from './ownerChips.js';
 
 export function createAccountsView({ app, ui }) {
   let showArchived = false;
@@ -30,6 +31,7 @@ export function createAccountsView({ app, ui }) {
           </div>
         </div>
         <div class="fin-hint">For a credit card, enter what you owe as a negative number, e.g. -250.00.</div>
+        ${ownerPickerHtml(app, account ? account.owner_ids : defaultOwnerIds(app))}
         <div class="fin-form-error" role="alert" hidden></div>
         <div class="task-form-actions">
           ${isNew ? '' : `
@@ -49,6 +51,7 @@ export function createAccountsView({ app, ui }) {
           <span class="memory-item-title">${esc(account.name)}</span>
           <span class="fin-row-sub">${esc(ACCOUNT_TYPE_LABELS[account.account_type] || account.account_type)}${account.archived ? ' · archived' : ''}</span>
         </div>
+        ${ownersHtml(app, account.owner_ids)}
         ${balanceHtml(account.balance_pence)}
       </div>`;
   }
@@ -98,6 +101,7 @@ export function createAccountsView({ app, ui }) {
     const errorBox = form.querySelector('.fin-form-error');
     const fail = (msg) => { errorBox.textContent = msg; errorBox.hidden = !msg; };
     const close = () => { editing = null; render(container); };
+    const readOwners = wireOwnerPicker(form);
     form.querySelector('[data-action="cancel"]').addEventListener('click', close);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -107,9 +111,18 @@ export function createAccountsView({ app, ui }) {
         opening_balance: form.opening_balance.value.trim() || '0',
       };
       if (!body.name) { fail('Give the account a name'); return; }
+      const ownerIds = readOwners();
+      if (!ownerIds.length) { fail('Choose at least one owner'); return; }
+      const ownersChanged = account && !sameOwners(ownerIds, account.owner_ids);
+      if (ownersChanged) {
+        const ok = await ui.styledConfirm(
+          `Change who owns "${account.name}"? This also changes who owns all of its transactions, including past ones, so everyone's figures will be recalculated.`,
+          { title: 'Change owners', confirmText: 'Change owners' });
+        if (!ok) return;
+      }
       try {
-        if (account) await app.updateAccount(account.id, body);
-        else await app.createAccount(body);
+        if (account) await app.saveAccount(account.id, body, ownersChanged ? ownerIds : null);
+        else await app.createAccount({ ...body, owner_ids: ownerIds });
         ui.showToast(account ? 'Account saved' : 'Account added');
         editing = null;
         if (afterSave) afterSave(); else render(mounted);

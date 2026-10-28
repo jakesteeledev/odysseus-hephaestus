@@ -37,6 +37,7 @@ class AccountCreate(BaseModel):
     name: str
     account_type: str = "current"
     opening_balance: str = "0"
+    owner_ids: Optional[List[str]] = None  # default: the primary member
 
 
 class AccountUpdate(BaseModel):
@@ -128,6 +129,11 @@ class ItemCreate(BaseModel):
     linked_asset_id: Optional[str] = None
     value: Optional[str] = None
     value_date: Optional[str] = None
+    owner_ids: Optional[List[str]] = None  # default: the primary member
+
+
+class OwnersSet(BaseModel):
+    member_ids: List[str]
 
 
 class ItemUpdate(BaseModel):
@@ -301,6 +307,21 @@ def _changes(body: BaseModel) -> dict:
     return body.model_dump(exclude_unset=True)
 
 
+def _person(db, owner: str, person: Optional[str]) -> Optional[str]:
+    """``?person=`` -> a member id, or None for the whole household."""
+    member = mem.resolve_person(db, owner, person)
+    return member.id if member else None
+
+
+def _account_out(db, owner: str, account) -> dict:
+    balance = fin.account_balances(db, owner, [account.id])[account.id]
+    owner_ids = mem.owners_of(db, owner, "account", [account.id]).get(account.id, [])
+    return fin.account_to_dict(account, balance, owner_ids)
+
+
+_OWNED_COLLECTIONS = {"accounts": "account", "assets": "asset", "liabilities": "liability"}
+
+
 # ── Routes ──────────────────────────────────────────────────────────────
 
 
@@ -350,12 +371,13 @@ def setup_finance_routes() -> APIRouter:
     # Accounts
 
     @router.get("/accounts")
-    def list_accounts(request: Request, include_archived: bool = False):
+    def list_accounts(request: Request, include_archived: bool = False, person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            accounts = fin.list_accounts(db, owner, include_archived=include_archived)
+            accounts = fin.list_accounts(db, owner, include_archived=include_archived,
+                                         person=_person(db, owner, person))
             active = [a for a in accounts if not a["archived"]]
-            return {"accounts": accounts, "total_pence": sum(a["balance_pence"] for a in active)}
+            return {"accounts": accounts, "total_pence": sum(a["share_pence"] for a in active)}
 
     @router.post("/accounts")
     def create_account(body: AccountCreate, request: Request):
@@ -363,16 +385,25 @@ def setup_finance_routes() -> APIRouter:
         with _session() as db:
             account = fin.create_account(db, owner, name=body.name, account_type=body.account_type,
                                          opening_balance=body.opening_balance)
-            balance = fin.account_balances(db, owner, [account.id])[account.id]
-            return fin.account_to_dict(account, balance)
+            if body.owner_ids:
+                mem.set_owners(db, owner, "account", account.id, body.owner_ids)
+            return _account_out(db, owner, account)
 
     @router.patch("/accounts/{account_id}")
     def update_account(account_id: str, body: AccountUpdate, request: Request):
         owner = _owner(request)
         with _session() as db:
             account = fin.update_account(db, owner, account_id, **_changes(body))
-            balance = fin.account_balances(db, owner, [account.id])[account.id]
-            return fin.account_to_dict(account, balance)
+            return _account_out(db, owner, account)
+
+    @router.put("/{collection}/{item_id}/owners")
+    def set_owners(collection: str, item_id: str, body: OwnersSet, request: Request):
+        kind = _OWNED_COLLECTIONS.get(collection)
+        if kind is None:
+            raise HTTPException(404, "not found")
+        owner = _owner(request)
+        with _session() as db:
+            return {"owner_ids": mem.set_owners(db, owner, kind, item_id, body.member_ids)}
 
     @router.delete("/accounts/{account_id}")
     def delete_account(account_id: str, request: Request):
@@ -583,10 +614,10 @@ def setup_finance_routes() -> APIRouter:
     # Net worth, assets and liabilities (v2)
 
     @router.get("/networth")
-    def networth(request: Request, as_of: Optional[str] = None):
+    def networth(request: Request, as_of: Optional[str] = None, person: Optional[str] = None):
         owner = _owner(request)
         with _session() as db:
-            return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"))
+            return nw.net_worth(db, owner, as_of=_optional_date(as_of, "as_of"), person=_person(db, owner, person))
 
     # Charts (v2 stage 5): specific paths before the generic routes below.
 
@@ -763,23 +794,27 @@ def setup_finance_routes() -> APIRouter:
         return "asset" if collection == "assets" else "liability"
 
     @router.get("/{collection}")
-    def list_items(collection: str, request: Request, include_archived: bool = False):
+    def list_items(collection: str, request: Request, include_archived: bool = False, person: Optional[str] = None):
         kind = _kind(collection)
         owner = _owner(request)
         with _session() as db:
-            return {collection: nw.list_items(db, owner, kind, include_archived=include_archived)}
+            return {collection: nw.list_items(db, owner, kind, include_archived=include_archived,
+                                              person=_person(db, owner, person))}
 
     @router.post("/{collection}")
     def create_item(collection: str, body: ItemCreate, request: Request):
         kind = _kind(collection)
         owner = _owner(request)
         data = body.model_dump()
+        owner_ids = data.pop("owner_ids", None)
         if kind == "asset":
             data.pop("lender"); data.pop("linked_asset_id")
         else:
             data.pop("provider")
         with _session() as db:
             item = nw.create_item(db, owner, kind, **data)
+            if owner_ids:
+                mem.set_owners(db, owner, kind, item.id, owner_ids)
             return nw._item_dict(db, owner, kind, item, None)
 
     @router.patch("/{collection}/{item_id}")

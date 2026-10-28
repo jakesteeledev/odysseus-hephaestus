@@ -179,6 +179,11 @@ export function createFinanceState({ api, storage, now }) {
     itemById,
     createItem: (kind, body) => mutate(() => api.createItem(collectionOf(kind), body)),
     updateItem: (kind, id, body) => mutate(() => api.updateItem(collectionOf(kind), id, body)),
+    saveItem: (kind, id, body, ownerIds) => mutate(async () => {
+      const item = await api.updateItem(collectionOf(kind), id, body);
+      if (ownerIds) await api.setOwners(collectionOf(kind), id, ownerIds);
+      return item;
+    }),
     deleteItem: (kind, id) => mutate(() => api.deleteItem(collectionOf(kind), id)),
     listValuations: (kind, id) => api.valuations(collectionOf(kind), id).then((r) => r.valuations),
     addValuation: (kind, id, body) => mutate(() => api.addValuation(collectionOf(kind), id, body)),
@@ -195,6 +200,12 @@ export function createFinanceState({ api, storage, now }) {
     deleteTransaction: (id) => mutate(() => api.deleteTransaction(id)),
     createAccount: (body) => mutate(() => api.createAccount(body)),
     updateAccount: (id, body) => mutate(() => api.updateAccount(id, body)),
+    /** Save an account's details and, when given, its owners, with one reload. */
+    saveAccount: (id, body, ownerIds) => mutate(async () => {
+      const account = await api.updateAccount(id, body);
+      if (ownerIds) await api.setOwners('accounts', id, ownerIds);
+      return account;
+    }),
     deleteAccount: (id) => mutate(() => api.deleteAccount(id)),
     createCategory: (body) => mutate(() => api.createCategory(body)),
     updateCategory: (id, body) => mutate(() => api.updateCategory(id, body)),

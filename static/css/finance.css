@@ -186,3 +186,15 @@
   background: color-mix(in srgb, var(--fin-color, var(--fg)) 22%, transparent);
   border: 1px solid color-mix(in srgb, var(--fin-color, var(--fg)) 55%, transparent); }
 .fin-row-archived { opacity: 0.6; }
+.fin-owners { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.fin-avatar-stack { display: inline-flex; }
+.fin-avatar-stack .fin-avatar { width: 18px; height: 18px; font-size: 8px; background-color: var(--bg); }
+.fin-avatar-stack .fin-avatar + .fin-avatar { margin-left: -5px; }
+.fin-owner-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.fin-owner-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border: 1px solid var(--border);
+  border-radius: 999px; background: none; color: var(--fg); font: inherit; cursor: pointer; opacity: 0.65; }
+.fin-owner-chip.active { border-color: var(--red); opacity: 1; }
+.fin-owner-chip:focus-visible { outline: 1px solid var(--red); outline-offset: 1px; }
+.fin-members-breakdown { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.fin-member-worth { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.fin-member-worth .fin-row-main { flex: 1; min-width: 0; }

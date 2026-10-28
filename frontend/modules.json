@@ -256,6 +256,10 @@
       "deployment": "js/features/finance/ui/settingsView.js"
     },
     {
+      "source": "features/finance/ui/ownerChips.js",
+      "deployment": "js/features/finance/ui/ownerChips.js"
+    },
+    {
       "source": "features/finance/ui/panel.js",
       "deployment": "js/features/finance/ui/panel.js"
     },

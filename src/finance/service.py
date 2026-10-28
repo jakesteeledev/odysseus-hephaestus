@@ -148,7 +148,8 @@ def _direction(value) -> str:
 # ── Serialisation ───────────────────────────────────────────────────────
 
 
-def account_to_dict(account: FinanceAccount, balance_pence: Optional[int] = None) -> dict:
+def account_to_dict(account: FinanceAccount, balance_pence: Optional[int] = None,
+                    owner_ids: Optional[list] = None) -> dict:
     data = {
         "id": account.id,
         "name": account.name,
@@ -161,6 +162,9 @@ def account_to_dict(account: FinanceAccount, balance_pence: Optional[int] = None
     }
     if balance_pence is not None:
         data["balance_pence"] = balance_pence
+    if owner_ids is not None:
+        data["owner_ids"] = list(owner_ids)
+        data["joint"] = len(owner_ids) > 1
     return data
 
 
@@ -308,20 +312,38 @@ def account_balances(db: Session, owner, account_ids: Optional[Iterable[str]] = 
     return {account_id: int(opening) + int(moved) for account_id, opening, moved in query.all()}
 
 
-def list_accounts(db: Session, owner, *, include_archived: bool = False) -> list[dict]:
+def list_accounts(db: Session, owner, *, include_archived: bool = False, person: Optional[str] = None) -> list[dict]:
+    """Accounts with balances and owners.
+
+    With *person* (a member id), only accounts they own are listed, and
+    ``share_pence`` is their share of the balance. Without it, ``share_pence``
+    is the whole balance.
+    """
+    from src.finance.members import ensure_household, owners_of, share_of
+
     owner = _require_owner(owner)
+    ensure_household(db, owner)
     query = db.query(FinanceAccount).filter(FinanceAccount.owner == owner)
     if not include_archived:
         query = query.filter(FinanceAccount.archived.is_(False))
     accounts = query.order_by(FinanceAccount.sort_order, FinanceAccount.name).all()
     balances = account_balances(db, owner, [a.id for a in accounts])
-    return [account_to_dict(a, balances.get(a.id, a.opening_balance_pence)) for a in accounts]
+    owners = owners_of(db, owner, "account", [a.id for a in accounts])
+    out = []
+    for account in accounts:
+        owner_ids = owners.get(account.id, [])
+        if person is not None and person not in owner_ids:
+            continue
+        row = account_to_dict(account, balances.get(account.id, account.opening_balance_pence), owner_ids)
+        row["share_pence"] = share_of(row["balance_pence"], owner_ids, person)
+        out.append(row)
+    return out
 
 
-def accounts_overview(db: Session, owner) -> dict:
-    """Active accounts with balances, plus their total."""
-    accounts = list_accounts(db, owner)
-    return {"accounts": accounts, "total_pence": sum(a["balance_pence"] for a in accounts)}
+def accounts_overview(db: Session, owner, *, person: Optional[str] = None) -> dict:
+    """Active accounts with balances, plus their total (the person's share with *person*)."""
+    accounts = list_accounts(db, owner, person=person)
+    return {"accounts": accounts, "total_pence": sum(a["share_pence"] for a in accounts)}
 
 
 # ── Categories ──────────────────────────────────────────────────────────

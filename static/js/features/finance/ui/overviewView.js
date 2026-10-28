@@ -5,7 +5,8 @@
 
 import { ACCOUNT_TYPE_LABELS, formatPence } from '../domain/money.js';
 import { CONTRIBUTION_TYPES, typeLabel } from '../domain/items.js';
-import { balanceHtml, emptyHtml, esc } from './dom.js';
+import { avatarHtml, balanceHtml, emptyHtml, esc } from './dom.js';
+import { hasHousehold, ownersHtml } from './ownerChips.js';
 
 export function createOverviewView({ app, accountsView, itemView }) {
   let editing = null; // { kind, id } or { kind, id: 'new' }
@@ -24,6 +25,7 @@ export function createOverviewView({ app, accountsView, itemView }) {
       if (item.type === 'property' && item.mortgages?.length) {
         parts.push(`equity ${formatPence(item.equity_pence)}`);
       }
+      if (item.owner_warning) parts.push('owners differ from the property');
     }
     if (item.archived) parts.push('archived');
     return parts.join(' · ');
@@ -46,6 +48,7 @@ export function createOverviewView({ app, accountsView, itemView }) {
                 <span class="memory-item-title">${esc(item.name)}</span>
                 <span class="fin-row-sub">${esc(itemSub(item, kind))}</span>
               </div>
+              ${ownersHtml(app, item.owner_ids)}
               ${balanceHtml(item.value_pence)}
             </div>`;
         }).join('')}
@@ -76,6 +79,24 @@ export function createOverviewView({ app, accountsView, itemView }) {
       </div>`;
   }
 
+  /** Each member's net worth (their share of everything they own), with the household total. */
+  function breakdownHtml(worth) {
+    if (!hasHousehold(app) || !worth.by_member?.length) return '';
+    return `
+      <div class="fin-members-breakdown" aria-label="Net worth by person">
+        <span class="fin-stat-label">By person</span>
+        ${worth.by_member.map((row) => `
+          <div class="fin-member-worth">
+            ${avatarHtml(row.member, { title: false })}
+            <div class="fin-row-main"><span class="memory-item-title">${esc(row.member.display_name)}</span>
+              <span class="fin-row-sub">${esc(`assets ${formatPence(row.assets_pence)} · owes ${formatPence(row.liabilities_pence)}`)}</span></div>
+            ${balanceHtml(row.net_worth_pence)}
+          </div>`).join('')}
+        <div class="fin-total-row"><span>Household</span>${balanceHtml(worth.net_worth_pence)}</div>
+      </div>
+      <div class="fin-hint">Joint items count equally towards each owner.</div>`;
+  }
+
   function render(container) {
     const worth = app.state.networth;
     if (!worth) { container.innerHTML = emptyHtml('Loading…'); return; }
@@ -88,6 +109,7 @@ export function createOverviewView({ app, accountsView, itemView }) {
           <div class="fin-stat"><span class="fin-stat-label">Liabilities</span>${balanceHtml(worth.liabilities_total_pence)}</div>
         </div>
         <div class="fin-hint">Account balances count automatically; credit cards count as money owed.</div>
+        ${breakdownHtml(worth)}
       </div>
       ${sideHtml('asset')}
       ${sideHtml('liability')}

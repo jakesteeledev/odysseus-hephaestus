@@ -343,3 +343,79 @@ def remove_owners(db: Session, owner: str, kind: str, item_id: str) -> None:
     db.query(FinanceItemOwner).filter(FinanceItemOwner.owner == owner, FinanceItemOwner.item_kind == _kind(kind),
                                       FinanceItemOwner.item_id == item_id).delete(synchronize_session=False)
     db.flush()
+
+
+def owner_map(db: Session, owner: str, kinds: Iterable[str] = OWNED_KINDS) -> dict:
+    """Map (kind, item id) -> member ids that own it, for every item of *kinds*."""
+    out = {}
+    for kind in kinds:
+        for item_id, member_ids in owners_of(db, owner, kind).items():
+            out[(kind, item_id)] = member_ids
+    return out
+
+
+def set_owners(db: Session, owner, kind: str, item_id, member_ids) -> list[str]:
+    """Replace the owners of an account, asset or liability. Returns them in split order.
+
+    Ownership is not dated: a change applies to the item's whole history
+    (for an account, to all its transactions, past ones included).
+    """
+    owner = _require_owner(owner)
+    kind = _kind(kind)
+    model = _ITEM_MODELS[kind]
+    item = db.query(model).filter(model.owner == owner, model.id == str(item_id or "")).first()
+    if item is None:
+        raise FinanceNotFound(f"{kind} not found")
+    wanted = []
+    for member_id in member_ids or []:
+        if member_id and str(member_id) not in wanted:
+            wanted.append(str(member_id))
+    if not wanted:
+        raise FinanceError("choose at least one owner")
+    current = set(owners_of(db, owner, kind, [item.id]).get(item.id, []))
+    for member_id in wanted:
+        member = get_member(db, owner, member_id)
+        if member.archived and member.id not in current:
+            raise FinanceError(f"{member.name} is archived; restore them before giving them new items")
+    db.query(FinanceItemOwner).filter(FinanceItemOwner.owner == owner, FinanceItemOwner.item_kind == kind,
+                                      FinanceItemOwner.item_id == item.id).delete(synchronize_session=False)
+    for member_id in wanted:
+        db.add(FinanceItemOwner(owner=owner, item_kind=kind, item_id=item.id, member_id=member_id))
+    db.flush()
+    return owners_of(db, owner, kind, [item.id])[item.id]
+
+
+# ── Shares ──────────────────────────────────────────────────────────────
+
+
+def split_pence(amount: int, count: int) -> list[int]:
+    """Split *amount* into *count* equal shares that add up exactly.
+
+    Any leftover pence go to the first share (the first owner in split
+    order). Works for negative amounts too: -1001 / 3 -> [-335, -333, -333].
+    """
+    if count <= 0:
+        return []
+    amount = int(amount)
+    sign = -1 if amount < 0 else 1
+    base, leftover = divmod(abs(amount), count)
+    shares = [base] * count
+    shares[0] += leftover
+    return [sign * s for s in shares]
+
+
+def share_of(amount: int, owner_ids: list, member_id: Optional[str]) -> int:
+    """*member_id*'s share of *amount* (the whole amount for the household, None)."""
+    if member_id is None:
+        return int(amount)
+    if member_id not in owner_ids:
+        return 0
+    return split_pence(amount, len(owner_ids))[owner_ids.index(member_id)]
+
+
+def resolve_person(db: Session, owner: str, person) -> Optional[FinanceMember]:
+    """A member id -> that member; empty or "household" -> None (the whole household)."""
+    text = str(person or "").strip()
+    if not text or text.lower() == "household":
+        return None
+    return get_member(db, owner, text)
