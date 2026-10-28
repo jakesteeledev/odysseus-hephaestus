@@ -339,8 +339,8 @@ def test_upgrade_to_v7_rebuilds_accounts_without_changing_data(tmp_path, monkeyp
     before = {t: _rows(path, t) for t in tables}
 
     backups = tmp_path / "backups"
-    assert migrations.migrate(engine, backup_dir=str(backups)) == 7
-    assert migrations.migrate(engine, backup_dir=str(backups)) == 7
+    assert migrations.migrate(engine, backup_dir=str(backups)) == migrations.SCHEMA_VERSION
+    assert migrations.migrate(engine, backup_dir=str(backups)) == migrations.SCHEMA_VERSION
     assert [p.name.split("-to-")[0] for p in backups.iterdir()] == ["app-before-finance-v6"]
     after = {t: _rows(path, t) for t in tables}
     assert after["finance_accounts"] == before["finance_accounts"]

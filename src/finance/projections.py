@@ -703,6 +703,11 @@ def _report(inputs: Inputs, a: Assumptions, engine: _Run, start: dict, points: l
             e["followup"] = (f"Monthly cash flow improves by {_pounds(e['monthly_change_pence'])} from "
                              f"{_month_label(_add_months(date(ended.year, ended.month, 1), 1))} "
                              f"(about {_pounds(before)} to {_pounds(before + e['monthly_change_pence'])} a month)")
+    income_years = []
+    if inputs.jobs:
+        from src.finance.payroll_jobs import income_by_tax_year
+
+        income_years = income_by_tax_year(engine)
     shortfalls = [p["shortfall_pence"] for p in points]
     peak = max(shortfalls) if shortfalls else 0
     runs_out = next((e for e in engine.events if e["kind"] == "cash_runs_out"), None)
@@ -719,6 +724,7 @@ def _report(inputs: Inputs, a: Assumptions, engine: _Run, start: dict, points: l
                       "year_end_pence": [y["shortfall_pence"] for y in years]},
         "assumptions": assumptions_used(inputs, a),
         "warnings": list(inputs.warnings),
+        "income_by_tax_year": income_years,
         "end": points[-1] if points else start,
     }
 
@@ -748,6 +754,19 @@ def assumptions_used(inputs: Inputs, a: Assumptions) -> list:
         {"key": "shortfall_rate", "label": "Shortfall interest", "value": _percent(a.shortfall_rate_bp)},
         {"key": "cards", "label": "Credit cards", "value": "Held at today's balance unless a regular transfer pays them"},
     ]
+    if inputs.jobs:
+        from src.finance import uk_tax_rules as tr
+
+        known = max(tr.RULES)
+        rows.append({"key": "tax_rules", "label": "Tax rules",
+                     "value": f"Each tax year uses its own rates; {tr.tax_year_label(known + 1)} onwards uses "
+                              f"{tr.tax_year_label(known)} rates and thresholds (no newer ones published)"})
+        cap = tr.SCHEDULED["salary_sacrifice_cap"]
+        rows.append({"key": "sacrifice_cap", "label": "Salary sacrifice NI cap",
+                     "value": f"Pension sacrifice over £{cap['annual_cap'] / 100:,.0f} a year attracts NI from "
+                              f"{cap['from'].strftime('%-d %B %Y')}"})
+        rows.append({"key": "pay", "label": "Salary", "value": "Calculated net pay per pay date, with scheduled pay "
+                     "rises; student loan deductions stop when the loan is repaid"})
     return rows
 
 
@@ -978,6 +997,13 @@ def load_inputs(db: Session, owner, *, today: Optional[date] = None,
                                          "so its balance is held flat.", "liability", x.id))
         liabilities.append(Liability(x.id, x.name, x.liability_type, bal, terms, x.interest_bp,
                                      x.linked_asset_id, x.subtype or ""))
+        if s is not None and bal > 0 and terms.payment:
+            walk = loans._walk(db, owner, x, s, today)
+            missed = loans.missed_payments(s, walk.payments, today)
+            if missed:
+                warnings.append(_warning("missed_payments", f"{x.name} has {len(missed)}{'+' if len(missed) >= 6 else ''} "
+                                         "expected payment(s) with nothing recorded, so its balance may be too high. "
+                                         "Link the payments or add a balance from a statement.", "liability", x.id))
         if s is None and bal > 0 and x.id not in paid_by_regular and x.liability_type != "student_loan":
             warnings.append(_warning("flat_liability", f"{x.name} has no repayment schedule and no recurring "
                                      "payment linked, so its balance is held flat.", "liability", x.id))

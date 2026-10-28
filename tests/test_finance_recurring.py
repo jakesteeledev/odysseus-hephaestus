@@ -71,7 +71,7 @@ def test_due_dates_window_and_end_date(db, account):
 
 def test_validation(db, account):
     with pytest.raises(fin.FinanceError):
-        rec.create_recurring(db, OWNER, name="X", account_id=account.id, amount="1", frequency="fortnightly")
+        rec.create_recurring(db, OWNER, name="X", account_id=account.id, amount="1", frequency="daily")
     with pytest.raises(fin.FinanceError):
         rec.create_recurring(db, OWNER, name="X", account_id=account.id, amount="1", next_due="2026-05-01",
                              end_date="2026-04-01")

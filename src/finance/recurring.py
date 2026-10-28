@@ -61,9 +61,10 @@ from src.finance.service import (
     parse_date,
 )
 
-FREQUENCY_LABELS = {"weekly": "Weekly", "four_weekly": "Every 4 weeks", "monthly": "Monthly",
-                    "quarterly": "Quarterly", "yearly": "Yearly"}
-FREQUENCY_DAYS = {"weekly": 7, "four_weekly": 28, "monthly": 30.44, "quarterly": 91.31, "yearly": 365.25}
+FREQUENCY_LABELS = {"weekly": "Weekly", "fortnightly": "Every 2 weeks", "four_weekly": "Every 4 weeks",
+                    "monthly": "Monthly", "quarterly": "Quarterly", "yearly": "Yearly"}
+FREQUENCY_DAYS = {"weekly": 7, "fortnightly": 14, "four_weekly": 28, "monthly": 30.44, "quarterly": 91.31,
+                  "yearly": 365.25}
 MATCH_DAYS_BEFORE = 5
 MATCH_DAYS_AFTER = 7
 LOOKBACK_DAYS = 60  # unresolved occurrences older than this are no longer shown
@@ -77,11 +78,12 @@ _STOP_WORDS = {"the", "and", "ltd", "limited", "plc", "payment", "card", "direct
 def _frequency(value) -> str:
     text = str(value or "monthly").strip().lower().replace(" ", "_").replace("-", "_")
     text = {"week": "weekly", "every_week": "weekly", "fortnightly_x2": "four_weekly", "4_weekly": "four_weekly",
-            "every_4_weeks": "four_weekly", "four_weeks": "four_weekly", "month": "monthly",
+            "every_4_weeks": "four_weekly", "four_weeks": "four_weekly",
+            "every_2_weeks": "fortnightly", "biweekly": "fortnightly", "two_weekly": "fortnightly", "month": "monthly",
             "every_month": "monthly", "quarter": "quarterly", "annual": "yearly", "annually": "yearly",
             "year": "yearly", "every_year": "yearly"}.get(text, text)
     if text not in FREQUENCIES:
-        raise FinanceError("frequency must be weekly, every 4 weeks, monthly, quarterly or yearly")
+        raise FinanceError("frequency must be weekly, every 2 weeks, every 4 weeks, monthly, quarterly or yearly")
     return text
 
 
@@ -96,6 +98,8 @@ def occurrence(anchor: date, frequency: str, n: int) -> date:
     """The n-th due date (n = 0 is the first)."""
     if frequency == "weekly":
         return anchor + timedelta(days=7 * n)
+    if frequency == "fortnightly":
+        return anchor + timedelta(days=14 * n)
     if frequency == "four_weekly":
         return anchor + timedelta(days=28 * n)
     months = {"monthly": 1, "quarterly": 3, "yearly": 12}[frequency]
@@ -131,7 +135,23 @@ def recurring_to_dict(item: FinanceRecurring) -> dict:
         "end_date": item.end_date.isoformat() if item.end_date else None, "match_text": item.match_text or "",
         "liability_id": item.liability_id, "asset_id": item.asset_id, "archived": bool(item.archived),
         "to_account_id": item.to_account_id, "is_transfer": bool(item.to_account_id),
+        "job_id": getattr(item, "job_id", None), "calculated": bool(getattr(item, "job_id", None)),
     }
+
+
+CALCULATED_MESSAGE = ("this is your calculated net pay; change your salary setup in Finance > Salary instead "
+                      "of editing it here")
+
+
+def expected_amount(db: Session, owner: str, item: FinanceRecurring, due: date, cache: Optional[dict] = None) -> int:
+    """The amount expected on a due date: calculated pay for a job's item, else the item's amount."""
+    if getattr(item, "job_id", None):
+        from src.finance.payroll_jobs import net_pay_on
+
+        value = net_pay_on(db, owner, item.job_id, due, cache=cache)
+        if value is not None and value > 0:
+            return value
+    return item.amount_pence
 
 
 def get_recurring(db: Session, owner: str, recurring_id) -> FinanceRecurring:
@@ -200,6 +220,8 @@ def create_recurring(db: Session, owner, *, name, account_id, amount, direction=
 def update_recurring(db: Session, owner, recurring_id, **changes) -> FinanceRecurring:
     owner = _require_owner(owner)
     item = get_recurring(db, owner, recurring_id)
+    if item.job_id and set(k for k, v in changes.items() if v is not None) - {"archived"}:
+        raise FinanceError(CALCULATED_MESSAGE)
     if changes.get("name") is not None:
         item.name = _clean_text(changes["name"], field="name", max_len=MAX_NAME_LEN, required=True)
     if changes.get("account_id") is not None:
@@ -243,6 +265,8 @@ def delete_recurring(db: Session, owner, recurring_id) -> None:
     """Delete an item and its decisions; transactions it created or matched stay."""
     owner = _require_owner(owner)
     item = get_recurring(db, owner, recurring_id)
+    if item.job_id:
+        raise FinanceError(CALCULATED_MESSAGE)
     db.query(FinanceRecurringEvent).filter(FinanceRecurringEvent.owner == owner,
                                            FinanceRecurringEvent.recurring_id == item.id).delete(synchronize_session=False)
     db.delete(item)
@@ -261,6 +285,8 @@ def list_recurring(db: Session, owner, *, include_archived: bool = False) -> lis
         upcoming = next((d for d in due_dates(item, today, today + timedelta(days=400))
                          if _event(db, owner, item.id, d) is None), None)
         row["next_due"] = upcoming.isoformat() if upcoming else None
+        if upcoming and item.job_id:
+            row["amount_pence"] = expected_amount(db, owner, item, upcoming)
         out.append(row)
     return out
 
@@ -276,7 +302,8 @@ def _amount_close(a: int, b: int) -> bool:
     return abs(a - b) <= max(200, round(0.10 * max(a, b)))
 
 
-def _score(item: FinanceRecurring, tx: FinanceTransaction, due: date) -> Optional[float]:
+def _score(item: FinanceRecurring, tx: FinanceTransaction, due: date, amount: Optional[int] = None) -> Optional[float]:
+    expected = item.amount_pence if amount is None else amount
     if tx.account_id != item.account_id or tx.direction != item.direction:
         return None
     if bool(tx.transfer_id) != bool(item.to_account_id):  # transfers only match transfers
@@ -284,10 +311,10 @@ def _score(item: FinanceRecurring, tx: FinanceTransaction, due: date) -> Optiona
     gap = (tx.date - due).days
     if gap < -MATCH_DAYS_BEFORE or gap > MATCH_DAYS_AFTER:
         return None
-    if not _amount_close(tx.amount_pence, item.amount_pence):
+    if not _amount_close(tx.amount_pence, expected):
         return None
     shared = _words(item.match_text or item.name) & _words(tx.description)
-    exact = tx.amount_pence == item.amount_pence
+    exact = tx.amount_pence == expected
     if not shared and not (exact and abs(gap) <= 2):
         return None
     return len(shared) * 2 + (2 if exact else 0) - abs(gap) * 0.2
@@ -311,6 +338,7 @@ def match_candidates(db: Session, owner: str, item: FinanceRecurring, due: date,
     from src.finance.service import transaction_to_dict
 
     claimed = _claimed_transactions(db, owner) if claimed is None else claimed
+    amount = expected_amount(db, owner, item, due)
     rows = db.query(FinanceTransaction).filter(
         FinanceTransaction.owner == owner, FinanceTransaction.account_id == item.account_id,
         FinanceTransaction.date >= due - timedelta(days=MATCH_DAYS_BEFORE),
@@ -321,7 +349,7 @@ def match_candidates(db: Session, owner: str, item: FinanceRecurring, due: date,
             continue
         if item.to_account_id and _transfer_target(db, owner, tx) != item.to_account_id:
             continue
-        score = _score(item, tx, due)
+        score = _score(item, tx, due, amount)
         if score is not None:
             scored.append((score, tx))
     scored.sort(key=lambda pair: -pair[0])
@@ -378,7 +406,7 @@ def confirm(db: Session, owner, recurring_id, due, *, on=None, amount=None) -> F
     if _event(db, owner, item.id, day) is not None:
         raise FinanceConflict(f"{item.name} on {day.isoformat()} is already confirmed or skipped")
     when = on if on not in (None, "") else day
-    value = amount if amount not in (None, "") else Decimal(item.amount_pence) / 100
+    value = amount if amount not in (None, "") else Decimal(expected_amount(db, owner, item, day)) / 100
     if item.to_account_id:
         tx, _ = create_transfer(db, owner, from_account_id=item.account_id, to_account_id=item.to_account_id,
                                 date=when, amount=value, description=item.name)
@@ -386,7 +414,15 @@ def confirm(db: Session, owner, recurring_id, due, *, on=None, amount=None) -> F
     tx = create_transaction(db, owner, account_id=item.account_id, date=when, amount=value,
                             direction=item.direction, category_id=item.category_id, description=item.name)
     _apply_links(db, owner, item, tx.id)
+    _payroll_confirmed(db, owner, item, day)
     return _record(db, owner, item, day, "confirmed", tx.id, created=True)
+
+
+def _payroll_confirmed(db: Session, owner: str, item: FinanceRecurring, day: date) -> None:
+    if item.job_id:
+        from src.finance.payroll_jobs import on_pay_confirmed
+
+        on_pay_confirmed(db, owner, item, day)
 
 
 def match(db: Session, owner, recurring_id, due, transaction_id) -> FinanceRecurringEvent:
@@ -404,6 +440,7 @@ def match(db: Session, owner, recurring_id, due, transaction_id) -> FinanceRecur
     if not item.to_account_id and tx.transfer_id:
         raise FinanceError("a transfer can't be matched to a payment")
     _apply_links(db, owner, item, tx.id)
+    _payroll_confirmed(db, owner, item, day)
     return _record(db, owner, item, day, "confirmed", tx.id)
 
 
@@ -422,6 +459,10 @@ def undo(db: Session, owner, recurring_id, due) -> None:
     if event is None:
         raise FinanceNotFound("nothing to undo for that date")
     tx_id, created = event.transaction_id, event.created_transaction
+    if item.job_id and event.status == "confirmed":
+        from src.finance.payroll_jobs import on_pay_undone
+
+        on_pay_undone(db, owner, item, day)
     db.delete(event)
     db.flush()
     if created and tx_id:
@@ -491,20 +532,21 @@ def occurrences(db: Session, owner: str, start: date, end: date, *, today: Optio
     return out
 
 
-def _signed(item: FinanceRecurring) -> int:
-    return item.amount_pence if item.direction == "in" else -item.amount_pence
+def _signed(item: FinanceRecurring, amount: Optional[int] = None) -> int:
+    value = item.amount_pence if amount is None else amount
+    return value if item.direction == "in" else -value
 
 
-def _effect(item: FinanceRecurring, account_id: str) -> int:
+def _effect(item: FinanceRecurring, account_id: str, amount: Optional[int] = None) -> int:
     """What one occurrence does to *account_id*'s balance."""
     if item.account_id == account_id:
-        return _signed(item)
+        return _signed(item, amount)
     if item.to_account_id == account_id:
-        return item.amount_pence
+        return item.amount_pence if amount is None else amount
     return 0
 
 
-def _person_share(item: FinanceRecurring, owners: dict, person: Optional[str]) -> dict:
+def _person_share(item: FinanceRecurring, owners: dict, person: Optional[str], amount: Optional[int] = None) -> dict:
     """The amount as *person* sees it: ``share_pence`` and ``share_direction``.
 
     For a transfer between members, money leaving one member's account and
@@ -512,8 +554,9 @@ def _person_share(item: FinanceRecurring, owners: dict, person: Optional[str]) -
     """
     from src.finance.members import share_of
 
+    value = item.amount_pence if amount is None else amount
     if not item.to_account_id or person is None:
-        return {"share_pence": share_of(item.amount_pence, owners.get(item.account_id, []), person),
+        return {"share_pence": share_of(value, owners.get(item.account_id, []), person),
                 "share_direction": item.direction}
     effect = (share_of(item.amount_pence, owners.get(item.to_account_id, []), person)
               - share_of(item.amount_pence, owners.get(item.account_id, []), person))
@@ -544,6 +587,9 @@ def upcoming(db: Session, owner, *, days: int = 30, today: Optional[date] = None
     occ = occurrences(db, owner, today - timedelta(days=LOOKBACK_DAYS), max(horizon, month_end), today=today,
                       items=items)
     claimed = _claimed_transactions(db, owner)
+    pay_cache: dict = {}
+    amounts = {(o.item.id, o.due): expected_amount(db, owner, o.item, o.due, pay_cache) for o in occ
+               if o.item.job_id}
     rows = []
     for o in occ:
         if o.due > horizon or o.status in ("confirmed", "skipped") and o.due < today:
@@ -551,6 +597,9 @@ def upcoming(db: Session, owner, *, days: int = 30, today: Optional[date] = None
         row = {**recurring_to_dict(o.item), "recurring_id": o.item.id, "due_date": o.due.isoformat(),
                "status": o.status, "transaction_id": o.transaction_id, "matches": [],
                "owner_ids": owners.get(o.item.account_id, []), **_person_share(o.item, owners, person)}
+        if (o.item.id, o.due) in amounts:
+            row["amount_pence"] = amounts[(o.item.id, o.due)]
+            row.update(_person_share(o.item, owners, person, amount=row["amount_pence"]))
         if o.status in ("expected", "overdue") and o.due <= today + timedelta(days=MATCH_DAYS_BEFORE):
             row["matches"] = match_candidates(db, owner, o.item, o.due, claimed)
         rows.append(row)
@@ -563,7 +612,7 @@ def upcoming(db: Session, owner, *, days: int = 30, today: Optional[date] = None
     for account in accounts:
         if person is not None and person not in owners.get(account.id, []):
             continue
-        pending = sum(_effect(o.item, account.id) for o in occ
+        pending = sum(_effect(o.item, account.id, amounts.get((o.item.id, o.due))) for o in occ
                       if o.status in ("expected", "overdue") and o.due <= month_end)
         projected.append({"account_id": account.id, "name": account.name,
                           "balance_pence": balances.get(account.id, 0),

@@ -12,6 +12,7 @@ const TABS = [
   { id: 'transactions', label: 'Transactions', icon: ICONS.list },
   { id: 'upcoming', label: 'Upcoming', icon: ICONS.upcoming },
   { id: 'budgets', label: 'Budgets', icon: ICONS.budgets },
+  { id: 'salary', label: 'Salary', icon: ICONS.salary },
   { id: 'insights', label: 'Insights', icon: ICONS.summary },
   { id: 'import', label: 'Import', icon: ICONS.upload },
   { id: 'settings', label: 'Settings', icon: ICONS.settings },
@@ -114,6 +115,7 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
       case 'transactions': views.transactions.render(el); break;
       case 'upcoming': views.upcoming.render(el); break;
       case 'budgets': views.budgets.render(el); break;
+      case 'salary': views.salary.render(el); break;
       case 'insights': views.insights.render(el); break;
       case 'add': views.add(el, () => renderTab()); break;  // stay ready for the next entry
       case 'import': views.import.render(el); break;
@@ -142,6 +144,7 @@ export function createPanel({ app, views, Modals, makeWindowDraggable, spinner }
     views.transactions.reset();
     views.upcoming.reset();
     views.budgets.reset();
+    views.salary.reset();
     renderTab();
   }
 

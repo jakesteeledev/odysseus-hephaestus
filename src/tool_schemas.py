@@ -1669,7 +1669,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "amount": {"type": "string", "description": "add: amount in pounds. confirm: only if it differed from usual."},
                     "account": {"type": "string", "description": "add: account it comes from or goes into."},
                     "direction": {"type": "string", "enum": ["out", "in"], "description": "add: out = payment (default), in = income."},
-                    "frequency": {"type": "string", "enum": ["weekly", "four_weekly", "monthly", "quarterly", "yearly"], "description": "add: how often (default monthly)."},
+                    "frequency": {"type": "string", "enum": ["weekly", "fortnightly", "four_weekly", "monthly", "quarterly", "yearly"], "description": "add: how often (default monthly)."},
                     "next_due": {"type": "string", "description": "add: next due date, YYYY-MM-DD (default today)."},
                     "category": {"type": "string", "description": "add: optional category name."},
                     "due_date": {"type": "string", "description": "confirm/skip: which due date, YYYY-MM-DD (default the oldest one waiting)."}

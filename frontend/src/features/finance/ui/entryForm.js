@@ -106,7 +106,7 @@ export function createEntryForm({ app, ui, now }) {
         ${existing && !isTransfer ? `
         <div class="fin-make-recurring">
           <select class="task-form-input" data-recurring-frequency aria-label="How often">
-            <option value="weekly">Weekly</option><option value="four_weekly">Every 4 weeks</option>
+            <option value="weekly">Weekly</option><option value="fortnightly">Every 2 weeks</option><option value="four_weekly">Every 4 weeks</option>
             <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option>
           </select>
           <button type="button" class="task-btn" data-action="make-recurring" title="Track this as a regular payment or income">Make recurring</button>
