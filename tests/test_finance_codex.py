@@ -95,3 +95,18 @@ def test_finance_read_is_an_allowed_token_scope():
     assert _normalize_scopes("finance:read") == ["finance:read"]
     with pytest.raises(Exception):
         _normalize_scopes("finance:write")
+
+
+def test_household_reads(client):
+    """v3: members, children and ?person= are readable with finance:read too."""
+    members = client.get("/api/codex/finance/members", headers=READ).json()["members"]
+    assert [m["is_primary"] for m in members] == [True]
+    me = members[0]["id"]
+    whole = client.get("/api/codex/finance/networth", headers=READ).json()["net_worth_pence"]
+    assert client.get(f"/api/codex/finance/networth?person={me}", headers=READ).json()["net_worth_pence"] == whole
+    assert client.get("/api/codex/finance/networth?person=nobody", headers=READ).status_code == 404
+    assert client.get(f"/api/codex/finance/summary?year=2026&month=10&person={me}", headers=READ).json()[
+        "total_out_pence"] == 2500
+    assert client.get("/api/codex/finance/children", headers=READ).json()["children"] == []
+    assert client.get("/api/codex/finance/members", headers={"x-scopes": ""}).status_code == 403
+    assert client.post("/api/codex/finance/members", headers=READ, json={}).status_code == 405

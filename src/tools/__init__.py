@@ -27,6 +27,7 @@ from src.tools.finance import (  # noqa: F401
     do_query_finances, do_add_transaction, do_add_transfer, do_update_valuation, do_manage_recurring,
     do_set_budget,
 )
+from src.tools.finance_household import do_manage_members  # noqa: F401  HEPHAESTUS PATCH: finance v3
 from src.tools.calendar import do_manage_calendar  # noqa: F401
 from src.tools.image import do_edit_image  # noqa: F401
 from src.tools.research import do_manage_research, do_trigger_research  # noqa: F401

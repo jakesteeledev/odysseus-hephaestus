@@ -80,6 +80,7 @@ _COMMON_TOOL_NAMES = {
     "update_valuation",
     "manage_recurring",
     "set_budget",
+    "manage_members",
     "api_call",
     "app_api",
     "archive_email",

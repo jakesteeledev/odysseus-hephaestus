@@ -169,7 +169,7 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "manage_webhooks", "manage_tokens", "manage_settings", "manage_contact",
     "manage_calendar", "api_call", "app_api", "ui_control",
     "add_transaction", "add_transfer", "update_valuation", "manage_recurring",  # HEPHAESTUS PATCH: finance writes
-    "set_budget",
+    "set_budget", "manage_members",
     "send_email", "reply_to_email", "bulk_email", "delete_email",
     "archive_email", "mark_email_read", "unsubscribe_email", "block_sender",
     "manage_email_state",

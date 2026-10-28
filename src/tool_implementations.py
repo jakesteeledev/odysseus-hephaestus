@@ -65,6 +65,7 @@ from src.tools.finance import (  # noqa: F401
     do_query_finances, do_add_transaction, do_add_transfer, do_update_valuation, do_manage_recurring,
     do_set_budget,
 )
+from src.tools.finance_household import do_manage_members  # noqa: F401  HEPHAESTUS PATCH: finance v3
 # Calendar domain extracted to src/tools/calendar.py (slice 1, #4082/#4071).
 from src.tools.calendar import do_manage_calendar  # noqa: F401
 # Image domain extracted to src/tools/image.py (slice 1, #4082/#4071).
