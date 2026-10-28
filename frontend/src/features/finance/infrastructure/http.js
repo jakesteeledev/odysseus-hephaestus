@@ -102,6 +102,21 @@ export function createFinanceApi({ request }) {
     children: () => call('GET', '/children'),
     settings: () => call('GET', '/settings'),
     updateSettings: (body) => call('PATCH', '/settings', body),
+    // Projections and salary.
+    projection: (years, scenarioIds) => call('GET', `/insights/projection${qs({ years, scenario: (scenarioIds || []).join(',') })}`),
+    updateAssumptions: (body) => call('PATCH', '/projection/assumptions', body),
+    createScenario: (body) => call('POST', '/projection/scenarios', body),
+    updateScenario: (id, body) => call('PUT', `/projection/scenarios/${encodeURIComponent(id)}`, body),
+    deleteScenario: (id) => call('DELETE', `/projection/scenarios/${encodeURIComponent(id)}`),
+    salary: () => call('GET', '/salary'),
+    createJob: (body) => call('POST', '/salary/jobs', body),
+    updateJob: (id, body) => call('PATCH', `/salary/jobs/${encodeURIComponent(id)}`, body),
+    deleteJob: (id) => call('DELETE', `/salary/jobs/${encodeURIComponent(id)}`),
+    addJobChange: (jobId, body) => call('POST', `/salary/jobs/${encodeURIComponent(jobId)}/changes`, body),
+    deleteJobChange: (id) => call('DELETE', `/salary/changes/${encodeURIComponent(id)}`),
+    addPayslip: (jobId, body) => call('POST', `/salary/jobs/${encodeURIComponent(jobId)}/payslips`, body),
+    deletePayslip: (id) => call('DELETE', `/salary/payslips/${encodeURIComponent(id)}`),
+    replaceManualSalary: (recurringId) => call('POST', `/salary/replace-manual/${encodeURIComponent(recurringId)}`),
     // `collection` is 'accounts', 'assets' or 'liabilities'.
     setOwners: (collection, id, memberIds) => call('PUT', `/${collection}/${encodeURIComponent(id)}/owners`, { member_ids: memberIds }),
   };

@@ -695,6 +695,11 @@ def setup_finance_routes() -> APIRouter:
                 kids.set_setting(db, owner, "junior_isa_limit_pence", body.junior_isa_limit)
             return kids.settings(db, owner)
 
+    # Projections and salary: specific paths before the generic routes below.
+    from routes.finance.projection_routes import register_projection_routes
+
+    register_projection_routes(router, _owner, _session)
+
     # Recurring items (v2 stage 3): specific paths before the generic routes below.
 
     @router.get("/upcoming")

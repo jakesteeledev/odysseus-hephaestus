@@ -13,6 +13,7 @@ import { createUpcomingView } from './ui/upcomingView.js';
 import { createBudgetsView } from './ui/budgetsView.js';
 import { createInsightsView } from './ui/insightsView.js';
 import { createSettingsView } from './ui/settingsView.js';
+import { createSalaryView } from './ui/salaryView.js';
 import { createPanel } from './ui/panel.js';
 import uiModule from '/static/js/ui.js?v=20260916largetoolscroll1';
 import * as Modals from '/static/js/modalManager.js';
@@ -40,9 +41,10 @@ const views = {
     itemView: createItemView({ app, ui, now, loanSection: createLoanSection({ app, ui, now }) }),
   }),
   transactions: createTransactionsView({ app, entryForm, monthNav }),
-  insights: createInsightsView({ app, monthNav, storage: { chartRange: () => app.chartRange(), rememberChartRange: (v) => app.rememberChartRange(v) } }),
+  insights: createInsightsView({ app, ui, monthNav, storage: { chartRange: () => app.chartRange(), rememberChartRange: (v) => app.rememberChartRange(v) } }),
   upcoming: createUpcomingView({ app, ui, now }),
   budgets: createBudgetsView({ app, ui, monthNav }),
+  salary: createSalaryView({ app, ui }),
   add: (container, afterSave) => entryForm.render(container, { onDone: afterSave }),
   import: createImportView({ app, ui }),
   settings: createSettingsView({ app, ui, now }),

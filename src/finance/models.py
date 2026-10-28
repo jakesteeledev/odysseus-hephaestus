@@ -270,7 +270,8 @@ class FinanceRepayment(TimestampMixin, Base):
     )
 
 
-FREQUENCIES = ("weekly", "four_weekly", "monthly", "quarterly", "yearly")
+# Projections stage 2 adds fortnightly (for fortnightly pay).
+FREQUENCIES = ("weekly", "fortnightly", "four_weekly", "monthly", "quarterly", "yearly")
 
 
 class FinanceRecurring(TimestampMixin, Base):
@@ -294,11 +295,13 @@ class FinanceRecurring(TimestampMixin, Base):
     # Set for a regular transfer (e.g. pocket money): money moves from account_id to here.
     to_account_id = Column(String, ForeignKey("finance_accounts.id"), nullable=True)
     archived = Column(Boolean, nullable=False, default=False)
+    # Set for a job's calculated net pay: kept in step with the salary setup, not edited by hand.
+    job_id = Column(String, nullable=True, index=True)
 
     __table_args__ = (
         CheckConstraint("amount_pence > 0", name="ck_finance_recurring_amount"),
         CheckConstraint("direction IN ('in', 'out')", name="ck_finance_recurring_direction"),
-        CheckConstraint("frequency IN ('weekly', 'four_weekly', 'monthly', 'quarterly', 'yearly')",
+        CheckConstraint("frequency IN ('weekly', 'fortnightly', 'four_weekly', 'monthly', 'quarterly', 'yearly')",
                         name="ck_finance_recurring_frequency"),
     )
 
@@ -403,6 +406,127 @@ class FinanceSetting(Base):
     value = Column(String, nullable=False)
 
 
+# ── Projections: assumptions and saved scenarios ───────────────────────
+
+
+class FinanceProjectionSetting(Base):
+    """One projection assumption (key/value), e.g. ``growth:property`` = 150 (bp).
+
+    Keys are listed in ``src.finance.projections.ASSUMPTION_KEYS``; an asset
+    override is ``growth_asset:<asset id>``.
+    """
+
+    __tablename__ = "finance_projection_settings"
+
+    owner = Column(String, primary_key=True)
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
+
+class FinanceProjectionScenario(TimestampMixin, Base):
+    """A named what-if: a list of changes applied on top of the base projection."""
+
+    __tablename__ = "finance_projection_scenarios"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    changes_json = Column(Text, nullable=False, default="[]")
+    notes = Column(Text, nullable=False, default="")
+
+
+# ── Salary and payroll (UK) ────────────────────────────────────────────
+
+PAY_FREQUENCIES = ("weekly", "fortnightly", "four_weekly", "monthly")
+
+
+class FinanceJob(TimestampMixin, Base):
+    """A job paid through PAYE. Net pay is calculated by ``src.finance.payroll``.
+
+    Percentages are basis points (500 = 5%); fixed pension amounts are pence a month.
+    """
+
+    __tablename__ = "finance_jobs"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    member_id = Column(String, ForeignKey("finance_members.id"), nullable=True)
+    employer = Column(String, nullable=False)
+    frequency = Column(String, nullable=False, default="monthly")
+    pay_anchor = Column(Date, nullable=False)  # a pay date; others follow the frequency
+    salary_pence = Column(Integer, nullable=False)
+    tax_code = Column(String, nullable=False, default="")
+    region = Column(String, nullable=True)  # overrides the tax code prefix
+    ni_category = Column(String, nullable=False, default="A")
+    student_plans = Column(String, nullable=False, default="")  # comma-separated: plan_1,plan_2...
+    postgraduate = Column(Boolean, nullable=False, default=False)
+    sl_liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=True)
+    pg_liability_id = Column(String, ForeignKey("finance_liabilities.id"), nullable=True)
+    pension_method = Column(String, nullable=False, default="none")
+    pension_employee_bp = Column(Integer, nullable=False, default=0)
+    pension_employee_fixed_pence = Column(Integer, nullable=True)
+    pension_employer_bp = Column(Integer, nullable=False, default=0)
+    pension_employer_fixed_pence = Column(Integer, nullable=True)
+    pension_basis = Column(String, nullable=False, default="qualifying")
+    ni_passback_bp = Column(Integer, nullable=False, default=0)
+    pension_asset_id = Column(String, ForeignKey("finance_assets.id"), nullable=True)
+    account_id = Column(String, ForeignKey("finance_accounts.id"), nullable=True)  # where net pay lands
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    archived = Column(Boolean, nullable=False, default=False)
+    notes = Column(Text, nullable=False, default="")
+
+    __table_args__ = (
+        CheckConstraint("frequency IN ('weekly', 'fortnightly', 'four_weekly', 'monthly')",
+                        name="ck_finance_job_frequency"),
+        CheckConstraint("salary_pence >= 0", name="ck_finance_job_salary"),
+        CheckConstraint("pension_method IN ('none', 'salary_sacrifice', 'net_pay', 'relief_at_source')",
+                        name="ck_finance_job_pension_method"),
+        CheckConstraint("pension_basis IN ('qualifying', 'full')", name="ck_finance_job_pension_basis"),
+    )
+
+
+class FinanceJobChange(TimestampMixin, Base):
+    """A dated change to a job: pay rise, new salary, bonus, allowance, other
+    salary sacrifice, tax code or pension change."""
+
+    __tablename__ = "finance_job_changes"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    job_id = Column(String, ForeignKey("finance_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String, nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=True)
+    amount_pence = Column(Integer, nullable=False, default=0)
+    percent_bp = Column(Integer, nullable=False, default=0)
+    repeat = Column(String, nullable=False, default="once")
+    label = Column(String, nullable=False, default="")
+
+    __table_args__ = (
+        CheckConstraint("repeat IN ('once', 'yearly')", name="ck_finance_job_change_repeat"),
+    )
+
+
+class FinancePayslip(TimestampMixin, Base):
+    """Figures from a real payslip, for checking the salary setup."""
+
+    __tablename__ = "finance_payslips"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    job_id = Column(String, ForeignKey("finance_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    pay_date = Column(Date, nullable=False)
+    gross_pence = Column(Integer, nullable=True)
+    tax_pence = Column(Integer, nullable=True)
+    ni_pence = Column(Integer, nullable=True)
+    pension_pence = Column(Integer, nullable=True)
+    student_loan_pence = Column(Integer, nullable=True)
+    net_pence = Column(Integer, nullable=True)
+    tax_code = Column(String, nullable=False, default="")
+    notes = Column(Text, nullable=False, default="")
+
+
 class FinanceMeta(Base):
     """Finance schema bookkeeping (key/value), e.g. schema_version."""
 
@@ -437,8 +561,10 @@ V4_TABLES = [
 V5_TABLES = [FinanceBudget.__table__]
 V6_TABLES = [FinanceMember.__table__, FinanceItemOwner.__table__]
 V7_TABLES = [FinanceSetting.__table__]
+V8_TABLES = [FinanceProjectionSetting.__table__, FinanceProjectionScenario.__table__]
+V9_TABLES = [FinanceJob.__table__, FinanceJobChange.__table__, FinancePayslip.__table__]
 FINANCE_TABLES = (V1_TABLES + V2_TABLES + V3_TABLES + V4_TABLES + V5_TABLES + V6_TABLES + V7_TABLES
-                  + [FinanceMeta.__table__])
+                  + V8_TABLES + V9_TABLES + [FinanceMeta.__table__])
 
 _ensured: "weakref.WeakSet" = weakref.WeakSet()
 _ensure_lock = threading.Lock()

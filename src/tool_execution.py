@@ -1966,6 +1966,7 @@ async def _execute_tool_block_impl(
         do_manage_calendar,
         do_query_finances, do_add_transaction, do_add_transfer, do_update_valuation,  # HEPHAESTUS PATCH
         do_manage_recurring, do_set_budget, do_manage_members,
+        do_project_finances, do_manage_projection_scenario, do_query_salary, do_update_salary,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
@@ -2333,6 +2334,18 @@ async def _execute_tool_block_impl(
     elif tool == "manage_members":
         desc = "manage_members"
         result = await dispatched(do_manage_members(content, owner=owner))
+    elif tool == "project_finances":
+        desc = "project_finances"
+        result = await dispatched(do_project_finances(content, owner=owner))
+    elif tool == "manage_projection_scenario":
+        desc = "manage_projection_scenario"
+        result = await dispatched(do_manage_projection_scenario(content, owner=owner))
+    elif tool == "query_salary":
+        desc = "query_salary"
+        result = await dispatched(do_query_salary(content, owner=owner))
+    elif tool == "update_salary":
+        desc = "update_salary"
+        result = await dispatched(do_update_salary(content, owner=owner))
     elif tool == "download_model":
         desc = "download_model"
         result = await dispatched(do_download_model(content, owner=owner))

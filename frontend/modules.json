@@ -292,6 +292,14 @@
       "deployment": "js/features/finance/ui/budgetsView.js"
     },
     {
+      "source": "features/finance/ui/salaryView.js",
+      "deployment": "js/features/finance/ui/salaryView.js"
+    },
+    {
+      "source": "features/finance/ui/projectionsSection.js",
+      "deployment": "js/features/finance/ui/projectionsSection.js"
+    },
+    {
       "source": "features/finance/ui/charts.js",
       "deployment": "js/features/finance/ui/charts.js"
     },

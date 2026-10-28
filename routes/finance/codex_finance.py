@@ -139,3 +139,24 @@ def register_codex_finance(router: APIRouter, owner_for: Callable[[Request], str
         who = owner(request)
         with _read_session() as db:
             return bud.budget_status(db, who, year=year, month=month, person=member(db, who, person))
+
+    # Projections and salary (read-only).
+
+    @router.get("/finance/projection")
+    def codex_finance_projection(request: Request, years: Optional[int] = None, scenario: Optional[str] = None):
+        from src.finance import projections as proj
+
+        who = owner(request)
+        with _read_session() as db:
+            ids = [proj.find_scenario(db, who, scenario).id] if scenario else []
+            out = proj.projection(db, who, years=years, scenario_ids=ids)
+            out["scenario_list"] = proj.list_scenarios(db, who)
+            return out
+
+    @router.get("/finance/salary")
+    def codex_finance_salary(request: Request):
+        from src.finance.payroll_jobs import salary_overview
+
+        who = owner(request)
+        with _read_session() as db:
+            return salary_overview(db, who)

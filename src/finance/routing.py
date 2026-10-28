@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import re
 
+# Projections and salary: read tools first, then the writes behind approval.
+PROJECTION_TOOLS = frozenset({"project_finances", "manage_projection_scenario"})
+SALARY_TOOLS = frozenset({"query_salary", "update_salary"})
 FINANCE_TOOLS = frozenset({"query_finances", "add_transaction", "add_transfer", "update_valuation",
-                           "manage_recurring", "set_budget", "manage_members"})
+                           "manage_recurring", "set_budget", "manage_members"}) | PROJECTION_TOOLS | SALARY_TOOLS
 
 _MONEY_AMOUNT = r"(?:£\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s*(?:pounds?|quid|gbp)\b)"
 # v3: people in the household, and money words that make a mention of them a finance question.
@@ -23,6 +26,32 @@ _PEOPLE = (r"family|partner|kids?|children|my\s+(?:wife|husband|son|daughter|par
            r"(?:our|the)\s+(?:kids|children|family)")
 _MONEY_WORDS = (r"\b(?:money|net\s*worth|worth|savings|accounts?|isas?|finances|balances?|spending|spent|"
                 r"pension|owe|debts?|budget|share|assets)\b")
+
+# Projection questions: the future of the user's money (the engine works these out).
+_PROJECTION_WORDS = (
+    r"\b(?:projections?|forecasts?|debt[\s-]free|balloon(?:\s+payment)?|can\s+(?:i|we)\s+afford)\b"
+    r"|\bproject\s+(?:my|our|the)\b"
+    r"|\b(?:in|over|after)\s+(?:the\s+next\s+)?(?:\d{1,2}|one|two|three|five|ten|twenty)\s+years?\b"
+    r"|\b(?:by|in)\s+20\d\d\b(?=.{0,60}\b(?:worth|balance|owe|mortgage|loan|debts?|savings|pension|money|cash)\b)"
+    r"|\b(?:worth|balance|owe|mortgage|loan|debts?|savings|pension|money|cash)\b.{0,60}\b(?:by|in)\s+20\d\d\b"
+    r"|\bwhat\s+if\s+(?:i|we)\b.{0,50}\b(?:earn(?:ed)?|sold?|sell|overpa(?:y|id)|saved?|spent?|spend|stop(?:ped)?|quit|"
+    r"lost|hand(?:ed)?\s+(?:the\s+car\s+)?back|refinanc\w*|paid\s+off|pay\s+off|moved?|retire\w*)\b"
+    r"|\bwhen\s+(?:will|can|could)\s+(?:i|we)\b.{0,40}\b(?:pay\s+off|paid\s+off|clear|retire|be\s+debt|afford|own)\b"
+    r"|\b(?:retire|retirement)\b.{0,30}\b(?:afford|money|pension|savings|when|early|at\s+\d\d)\b"
+    r"|\b(?:save|create|add|make|delete|remove|compare|show|list)\b.{0,20}\b(?:projection\s+)?scenarios?\b"
+    r"|\bscenarios?\b.{0,60}\b(?:sell|car|house|mortgage|pcp|loan|pay|salary|overpay|balloon)\b"
+    r"|\bsell(?:ing)?\s+(?:the|my|our)\s+(?:car|house|home|flat|van)\b|\bpcp\b"
+)
+# Salary and payroll questions.
+_SALARY_WORDS = (
+    r"\b(?:take[\s-]?home|net\s+pay|pay\s*slips?|payslips?|tax\s+codes?|paye|income\s+tax|national\s+insurance|"
+    r"salary\s+sacrifice|pay\s+rise|payrise|student\s+loan\s+deductions?|pension\s+contributions?|marginal\s+rate|"
+    r"personal\s+allowance|wages?|salary)\b"
+    r"|\bmy\s+ni\b|\bni\s+(?:contributions?|category|deductions?)\b"
+    r"|\b(?:a|my|the)\s+(?:£\s?[\d,.]+k?\s+)?raise\b|\bbonus\b.{0,40}\b(?:tax|take[\s-]?home|pay|net|after)\b"
+    r"|\bsacrific\w*\s+\d{1,2}(?:\.\d+)?\s*%"
+    r"|\bpension\b.{0,20}\b\d{1,2}(?:\.\d+)?\s*%"
+)
 
 FINANCE_FAMILY_PATTERN = (
     r"\b(?:financ(?:e|es|ial)|net\s*worth|outgoings|expenses|income|salary|wages|savings|"
@@ -50,6 +79,8 @@ FINANCE_FAMILY_PATTERN = (
     rf"|\b(?:{_PEOPLE})\b(?=.{{0,40}}{_MONEY_WORDS})"
     rf"|{_MONEY_WORDS}(?=.{{0,40}}\b(?:{_PEOPLE})\b)"
     r"|\b[a-z]+(?:'s|s')\s+(?:net\s*worth|savings|isas?|accounts?|pension|money|share|balances?)\b"
+    # Projections and salary.
+    rf"|{_PROJECTION_WORDS}|{_SALARY_WORDS}"
 )
 FINANCE_FAMILY_RE = re.compile(FINANCE_FAMILY_PATTERN, re.I)
 
@@ -113,6 +144,9 @@ FINANCE_INTENT_PATTERNS = tuple(
         ("household member request",
          r"\b(?:add|remove|archive)\b.{0,40}\b(?:to|from)\s+(?:the|my|our)\s+household\b"
          r"|\bhousehold\s+members?\b"),
+        # Projections and salary.
+        ("salary question", _SALARY_WORDS),
+        ("projection question", _PROJECTION_WORDS),
         ("children's money question",
          rf"\b(?:{_PEOPLE})(?:'s|s'|')?\b.{{0,20}}{_MONEY_WORDS}(?!.*\b(?:calendar|appointment|note)\b)"),
     )
@@ -136,6 +170,36 @@ FINANCE_KEYWORDS = (
     "my daughter", "kids", "children", "junior isa", "junior isas", "jisa", "junior sipp", "pocket money",
     "household members", "tax year",
 )
+
+# Plain keywords for the projection and salary tools (substring routers add these first).
+PROJECTION_KEYWORDS = (
+    "project", "projection", "forecast", "in 5 years", "in 10 years", "years time", "by 2030", "by 2035",
+    "will i", "can i afford", "what if", "pay off", "paid off", "debt free", "debt-free", "retire", "balloon",
+    "scenario", "scenarios", "pcp", "sell the car", "sell my car", "sell the house",
+)
+SALARY_KEYWORDS = (
+    "salary", "wage", "wages", "payslip", "pay slip", "take-home", "take home", "net pay", "tax code", "paye",
+    "income tax", "national insurance", "my ni", "pay rise", "payrise", "a raise", "my raise", "bonus",
+    "salary sacrifice", "sacrifice", "pension contribution", "student loan deduction", "marginal rate",
+)
+_SALARY_FOCUS = re.compile(_SALARY_WORDS, re.I)
+_PROJECTION_FOCUS = re.compile(_PROJECTION_WORDS, re.I)
+
+
+def finance_tool_focus(text: str):
+    """The most specific finance read tool for a message: ``query_salary`` for
+    pay, tax and payslip questions, ``project_finances`` for anything about
+    the future, otherwise ``query_finances`` (None when it isn't finance)."""
+    text = text or ""
+    # "what if I earned £1,000 more a month" is a projection; "how much would a
+    # £3k pay rise change my take-home" is salary. Salary words win when both match.
+    if _SALARY_FOCUS.search(text):
+        return "query_salary"
+    if _PROJECTION_FOCUS.search(text):
+        return "project_finances"
+    if FINANCE_FAMILY_RE.search(text):
+        return "query_finances"
+    return None
 
 
 def finance_intent(text: str):

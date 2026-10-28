@@ -15,6 +15,7 @@ TOOL_TAGS = {
     "apply_patch", "todowrite",
     "query_finances", "add_transaction", "add_transfer", "update_valuation", "manage_recurring", "set_budget",  # HEPHAESTUS PATCH: finance
     "manage_members",  # HEPHAESTUS PATCH: finance v3 household
+    "project_finances", "manage_projection_scenario", "query_salary", "update_salary",  # HEPHAESTUS PATCH
     "grep", "glob", "ls", "get_workspace", "manage_bg_jobs",
     "create_document", "update_document", "edit_document",
     "search_chats",

@@ -10,6 +10,7 @@ import { shareNote } from './ownerChips.js';
 
 const FREQUENCIES = [
   { value: 'weekly', label: 'Weekly' },
+  { value: 'fortnightly', label: 'Every 2 weeks' },
   { value: 'four_weekly', label: 'Every 4 weeks' },
   { value: 'monthly', label: 'Monthly' },
   { value: 'quarterly', label: 'Quarterly' },

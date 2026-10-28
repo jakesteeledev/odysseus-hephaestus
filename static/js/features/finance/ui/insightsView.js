@@ -8,13 +8,15 @@
 import { formatPence, monthLabel } from '../domain/money.js';
 import { amountHtml, avatarHtml, esc, optionsHtml } from './dom.js';
 import { hasHousehold, possessive } from './ownerChips.js';
+import { createProjectionsSection } from './projectionsSection.js';
 import {
   barList, budgetBullets, incomeSpendingChart, membersChart, monthShort, netWorthChart, tableDetails, trendChart,
 } from './charts.js';
 
 const RANGES = [{ value: '6m', label: '6 months' }, { value: '1y', label: '1 year' }, { value: 'all', label: 'All time' }];
 
-export function createInsightsView({ app, monthNav, storage }) {
+export function createInsightsView({ app, ui, monthNav, storage }) {
+  const projections = createProjectionsSection({ app, ui });
   let range = storage?.chartRange?.() || '1y';
   let trendCategory = '';
   let data = { history: null, monthly: null, budgets: null };
@@ -111,7 +113,8 @@ export function createInsightsView({ app, monthNav, storage }) {
       ${card('income', 'Income vs spending', 'Per month', legend([
         { key: 'rect', cls: 'fin-c-neutral', label: 'Money in (above)' },
         { key: 'rect', cls: 'fin-c-accent', label: 'Money out (below)' }]))}
-      ${card('trend', trendCategory ? `Spending on ${app.categoryById(trendCategory)?.name || 'category'}` : 'Spending trend', 'Per month')}`;
+      ${card('trend', trendCategory ? `Spending on ${app.categoryById(trendCategory)?.name || 'category'}` : 'Spending trend', 'Per month')}
+      <div data-projections></div>`;
     monthNav.wire(container);
     container.querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', async () => {
       range = b.dataset.range;
@@ -173,11 +176,18 @@ export function createInsightsView({ app, monthNav, storage }) {
     }
   }
 
+  /** History for the projection chart: the household's, or just today when a person is shown. */
+  function projectionHistory() {
+    return app.personMember() ? [] : (data.history || []);
+  }
+
   async function refresh(container) {
     container.classList.add('fin-refreshing'); // keep the frame, dim while loading
     if (await load()) {
       shell(container);
       drawCharts(container);
+      const slotEl = container.querySelector('[data-projections]');
+      if (slotEl) projections.render(slotEl, projectionHistory());
     }
     container.classList.remove('fin-refreshing');
   }
@@ -192,7 +202,13 @@ export function createInsightsView({ app, monthNav, storage }) {
       if (Math.abs(container.clientWidth - lastWidth) < 8) return;
       lastWidth = container.clientWidth;
       clearTimeout(timer);
-      timer = setTimeout(() => drawCharts(container), 120);
+      timer = setTimeout(() => {
+        // Another tab may have replaced the Insights content since the resize.
+        if (!container.querySelector('[data-chart="spending"]')) return;
+        drawCharts(container);
+        const slotEl = container.querySelector('[data-projections]');
+        if (slotEl) projections.redraw(slotEl, projectionHistory());
+      }, 120);
     });
     observer.observe(container);
   }

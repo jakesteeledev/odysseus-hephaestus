@@ -17,6 +17,10 @@ runs idempotent ``_migrate_*`` helpers), so finance keeps its own small one:
   constraint, so ``finance_accounts`` is rebuilt to allow the child account
   types. Every row is copied unchanged, inside one transaction that rolls
   back unless the row count matches and every foreign key still resolves.
+- Step 8 adds the projection assumption and scenario tables.
+- Step 9 adds jobs, job changes and payslips, a ``job_id`` column on
+  ``finance_recurring``, and rebuilds ``finance_recurring`` the same careful
+  way as step 7 so its frequency CHECK allows ``fortnightly``.
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ from core.database import Base
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 9
 
 
 def _create(bind, tables) -> None:
@@ -106,21 +110,26 @@ NEW_ACCOUNT_CHECK = ("account_type IN ('current', 'savings', 'credit_card', 'cas
                      "'child_savings', 'child_current')")
 
 
-def _rebuild_accounts_table(bind) -> None:
-    """Rebuild finance_accounts with the wider account type CHECK (SQLite's
-    documented table-rebuild procedure). Skipped when already allowed."""
+def _rebuild_table(bind, table: str, old_check: str, new_check: str, marker: str) -> None:
+    """Rebuild *table* with a wider CHECK constraint (SQLite's documented
+    table-rebuild procedure). Skipped when *marker* is already in its SQL.
+
+    Every row is copied unchanged inside one transaction, which rolls back
+    unless the rows read back identical and every foreign key resolves.
+    """
     with bind.connect() as conn:
         row = conn.execute(text(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'finance_accounts'")).fetchone()
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :t"), {"t": table}).fetchone()
         indexes = [r[0] for r in conn.execute(text(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'finance_accounts' "
-            "AND sql IS NOT NULL"))]
-    if row is None or "child_savings" in row[0]:
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = :t AND sql IS NOT NULL"),
+            {"t": table})]
+    if row is None or marker in row[0]:
         return
-    if OLD_ACCOUNT_CHECK not in row[0] or not row[0].startswith("CREATE TABLE finance_accounts ("):
-        raise RuntimeError("finance_accounts has an unexpected shape; not rebuilding it")
-    create_new = row[0].replace(OLD_ACCOUNT_CHECK, NEW_ACCOUNT_CHECK).replace(
-        "CREATE TABLE finance_accounts (", "CREATE TABLE finance_accounts_v7 (", 1)
+    if old_check not in row[0] or not row[0].startswith(f"CREATE TABLE {table} ("):
+        raise RuntimeError(f"{table} has an unexpected shape; not rebuilding it")
+    temp = f"{table}_rebuild"
+    create_new = row[0].replace(old_check, new_check).replace(
+        f"CREATE TABLE {table} (", f"CREATE TABLE {temp} (", 1)
 
     raw = bind.raw_connection()
     con = raw.driver_connection
@@ -131,22 +140,22 @@ def _rebuild_accounts_table(bind) -> None:
         # otherwise trip the foreign keys that point at it.
         con.execute("PRAGMA foreign_keys=OFF")
         if con.execute("PRAGMA foreign_keys").fetchone()[0] != 0:
-            raise RuntimeError("could not pause foreign keys to rebuild finance_accounts")
+            raise RuntimeError(f"could not pause foreign keys to rebuild {table}")
         con.execute("BEGIN IMMEDIATE")
         try:
-            before = con.execute("SELECT * FROM finance_accounts ORDER BY id").fetchall()
+            before = con.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
             con.execute(create_new)
-            con.execute("INSERT INTO finance_accounts_v7 SELECT * FROM finance_accounts")
-            con.execute("DROP TABLE finance_accounts")
-            con.execute("ALTER TABLE finance_accounts_v7 RENAME TO finance_accounts")
+            con.execute(f"INSERT INTO {temp} SELECT * FROM {table}")
+            con.execute(f"DROP TABLE {table}")
+            con.execute(f"ALTER TABLE {temp} RENAME TO {table}")
             for sql in indexes:
                 con.execute(sql)
-            after = con.execute("SELECT * FROM finance_accounts ORDER BY id").fetchall()
+            after = con.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
             if after != before:
-                raise RuntimeError("finance_accounts rows changed while rebuilding; rolled back")
+                raise RuntimeError(f"{table} rows changed while rebuilding; rolled back")
             broken = con.execute("PRAGMA foreign_key_check").fetchall()
             if broken:
-                raise RuntimeError(f"foreign keys broken while rebuilding finance_accounts: {broken[:3]}")
+                raise RuntimeError(f"foreign keys broken while rebuilding {table}: {broken[:3]}")
             con.execute("COMMIT")
         except Exception:
             con.execute("ROLLBACK")
@@ -155,6 +164,15 @@ def _rebuild_accounts_table(bind) -> None:
         con.execute("PRAGMA foreign_keys=ON")
         con.isolation_level = previous_isolation
         raw.close()
+
+
+def _rebuild_accounts_table(bind) -> None:
+    """Allow the child account types (step 7)."""
+    _rebuild_table(bind, "finance_accounts", OLD_ACCOUNT_CHECK, NEW_ACCOUNT_CHECK, "child_savings")
+
+
+OLD_RECURRING_CHECK = "frequency IN ('weekly', 'four_weekly', 'monthly', 'quarterly', 'yearly')"
+NEW_RECURRING_CHECK = "frequency IN ('weekly', 'fortnightly', 'four_weekly', 'monthly', 'quarterly', 'yearly')"
 
 
 def _step_7(bind) -> None:
@@ -167,7 +185,25 @@ def _step_7(bind) -> None:
         _rebuild_accounts_table(bind)
 
 
-STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4, 5: _step_5, 6: _step_6, 7: _step_7}
+def _step_8(bind) -> None:
+    """Projections: assumption and scenario tables (new tables only)."""
+    from src.finance.models import V8_TABLES
+
+    _create(bind, V8_TABLES)
+
+
+def _step_9(bind) -> None:
+    """Salary: jobs, job changes, payslips; net pay recurring items; fortnightly frequency."""
+    from src.finance.models import V9_TABLES
+
+    _create(bind, V9_TABLES)
+    _add_column(bind, "finance_recurring", "job_id", "VARCHAR")
+    if bind.url.get_backend_name() == "sqlite":
+        _rebuild_table(bind, "finance_recurring", OLD_RECURRING_CHECK, NEW_RECURRING_CHECK, "'fortnightly'")
+
+
+STEPS = {1: _step_1, 2: _step_2, 3: _step_3, 4: _step_4, 5: _step_5, 6: _step_6, 7: _step_7, 8: _step_8,
+         9: _step_9}
 
 
 def _current_version(bind) -> int:

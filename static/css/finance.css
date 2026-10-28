@@ -218,3 +218,42 @@
 .fin-child-allowance, .fin-child-transfers { padding-left: 30px; display: flex; flex-direction: column; gap: 2px; }
 .fin-child-transfers .fin-child-item { padding-left: 0; }
 .fin-child .fin-link-btn { margin-left: 30px; }
+
+/* Salary and projections */
+.fin-warnings { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.fin-payslip { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.fin-payslip th, .fin-payslip td { padding: 4px 6px; border-bottom: 1px solid color-mix(in srgb, var(--fg) 10%, var(--bg)); text-align: right; }
+.fin-payslip th[scope="row"], .fin-payslip thead th:first-child { text-align: left; font-weight: 400; }
+.fin-payslip thead th { font-size: 10px; font-weight: 600; opacity: 0.7; }
+.fin-payslip-total th[scope="row"], .fin-payslip-total td { font-weight: 600; }
+.fin-payslip-flag th[scope="row"] { color: var(--color-error); }
+.fin-fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 8px 0; min-width: 0; }
+.fin-fieldset legend { padding: 0 4px; }
+.fin-check-row { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 6px; }
+.fin-form-grid { flex-wrap: wrap; }
+.fin-form-grid .fin-form-col { flex: 1 1 140px; }
+.fin-chart-today { stroke: color-mix(in srgb, var(--fg) 55%, var(--bg)); stroke-width: 1; stroke-dasharray: 2 3; }
+.fin-chart-line-light { stroke-width: 1.5; opacity: 0.8; }
+.fin-timeline { list-style: none; margin: 4px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.fin-timeline-item { display: grid; grid-template-columns: 64px 1fr; gap: 8px; font-size: 12px; align-items: baseline; }
+.fin-timeline-date { font-size: 11px; font-weight: 600; opacity: 0.75; font-variant-numeric: tabular-nums; }
+.fin-timeline-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.fin-timeline-text .fin-row-sub { white-space: normal; }
+.fin-timeline-alert .fin-timeline-text { color: var(--color-error); }
+.fin-timeline-alert .fin-row-sub { color: var(--fg); }
+.fin-assumptions { margin: 4px 0 10px; padding-left: 18px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
+.fin-scenario-changes { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.fin-scenario-change { display: flex; align-items: center; gap: 8px; justify-content: space-between; font-size: 12px;
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.fin-projections .fin-card-head { flex-wrap: wrap; }
+.fin-projections .fin-chart-table table { display: block; overflow-x: auto; white-space: nowrap; }
+@media (max-width: 768px) {
+  .fin-payslip { font-size: 11px; }
+  .fin-timeline-item { grid-template-columns: 54px 1fr; }
+  .fin-projections .fin-range-toggle { width: 100%; }
+}
+.fin-check-label[hidden], [data-cfield][hidden], [data-field][hidden], [data-pension][hidden] { display: none; }
+.fin-warning .fin-inline-link { display: inline; padding: 0 2px; border: 0; background: none; color: var(--red); font: inherit;
+  text-decoration: underline; cursor: pointer; vertical-align: baseline; min-height: 0; }
+.fin-more-warnings summary { cursor: pointer; font-size: 11px; opacity: 0.75; margin: 2px 0; }
+.fin-projections .fin-range-toggle .task-toggle-btn { white-space: nowrap; }

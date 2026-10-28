@@ -179,3 +179,44 @@ def test_upgrade_from_v2_adds_loans_and_keeps_data(tmp_path):
             assert sorted(conn.execute(text(f"SELECT {', '.join(cols)} FROM {t}")).fetchall()) == rows
     assert {"finance_loan_schedules", "finance_repayments"} <= tables
     engine.dispose()
+
+
+def test_upgrade_from_v8_allows_fortnightly_and_keeps_recurring_rows(tmp_path):
+    """Step 9 rebuilds finance_recurring (new frequency CHECK) without touching its rows."""
+    from src.finance.models import FINANCE_TABLES
+
+    path = tmp_path / "app.db"
+    engine = _engine(path)
+    Base.metadata.create_all(bind=engine, tables=[t for t in FINANCE_TABLES if t.name not in (
+        "finance_jobs", "finance_job_changes", "finance_payslips")])
+    with engine.begin() as conn:
+        sql = conn.execute(text("SELECT sql FROM sqlite_master WHERE name = 'finance_recurring'")).scalar()
+        old = sql.replace(migrations.NEW_RECURRING_CHECK, migrations.OLD_RECURRING_CHECK)
+        old = "\n".join(line for line in old.splitlines() if "job_id" not in line)
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text("DROP TABLE finance_recurring"))
+        conn.execute(text(old))
+        conn.execute(text("INSERT INTO finance_accounts (id, owner, name, account_type, opening_balance_pence, "
+                          "archived, sort_order, created_at, updated_at) VALUES ('a1', 'alice', 'Current', 'current', "
+                          "0, 0, 0, '2026-01-01', '2026-01-01')"))
+        conn.execute(text("INSERT INTO finance_recurring (id, owner, name, account_id, amount_pence, direction, "
+                          "frequency, anchor_date, match_text, archived, created_at, updated_at) VALUES ('r1', "
+                          "'alice', 'Rent', 'a1', 95000, 'out', 'monthly', '2026-01-01', 'rent', 0, '2026-01-01', "
+                          "'2026-01-01')"))
+        conn.execute(text("INSERT INTO finance_meta (key, value) VALUES ('schema_version', '8')"))
+    with pytest.raises(Exception):
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE finance_recurring SET frequency = 'fortnightly'"))
+    before = engine.connect().execute(text("SELECT * FROM finance_recurring")).fetchall()
+    backups = tmp_path / "backups"
+    assert migrations.migrate(engine, backup_dir=str(backups)) == migrations.SCHEMA_VERSION
+    assert [p.name.split("-to-")[0] for p in backups.iterdir()] == ["app-before-finance-v8"]
+    with engine.begin() as conn:
+        after = conn.execute(text("SELECT * FROM finance_recurring")).fetchall()
+        assert [tuple(r)[:-1] for r in after] == [tuple(r) for r in before]  # job_id is added last, empty
+        assert after[0][-1] is None
+        conn.execute(text("UPDATE finance_recurring SET frequency = 'fortnightly'"))
+        assert conn.execute(text("PRAGMA foreign_key_check")).fetchall() == []
+        assert conn.execute(text("PRAGMA integrity_check")).scalar() == "ok"
+    assert {"finance_jobs", "finance_job_changes", "finance_payslips"} <= set(inspect(engine).get_table_names())
+    engine.dispose()

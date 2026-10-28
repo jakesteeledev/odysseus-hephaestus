@@ -85,7 +85,9 @@ def test_non_money_questions_are_not_promoted_to_finance(request_text):
 def test_finance_family_registers_the_three_tools():
     assert FAMILY_TOOLS["finance"] == FINANCE_TOOLS == {"query_finances", "add_transaction", "add_transfer",
                                                           "update_valuation", "manage_recurring", "set_budget",
-                                                          "manage_members"}
+                                                          "manage_members", "project_finances",
+                                                          "manage_projection_scenario", "query_salary",
+                                                          "update_salary"}
     names = {s["function"]["name"] for s in FUNCTION_TOOL_SCHEMAS}
     assert FINANCE_TOOLS <= names
 
@@ -125,8 +127,8 @@ def test_plan_mode_blocks_finance_writes():
 
     disabled = plan_mode_disabled_tools()
     assert {"add_transaction", "add_transfer", "update_valuation", "manage_recurring", "set_budget",
-            "manage_members"} <= disabled
-    assert "query_finances" not in disabled
+            "manage_members", "manage_projection_scenario", "update_salary"} <= disabled
+    assert not {"query_finances", "project_finances", "query_salary"} & disabled
 
 
 def test_native_calls_convert_to_tool_blocks():

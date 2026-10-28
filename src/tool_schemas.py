@@ -1579,7 +1579,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "query_finances",
-            "description": "Read the user's household money records (GBP): net worth (assets minus liabilities), account balances, assets and liabilities, money in/out and spending by category, recent transactions, and children's accounts and Junior ISAs. Use for questions like 'what's our household net worth', 'what's my net worth', 'what's Sarah's net worth', 'how much do I owe', 'how much is in the kids' junior ISAs'. Read-only.",
+            "description": "Read the user's household money records (GBP): net worth (assets minus liabilities), account balances, assets and liabilities, money in/out and spending by category, recent transactions, and children's accounts and Junior ISAs. Use for questions like 'what's our household net worth', 'what's my net worth', 'what's Sarah's net worth', 'how much do I owe', 'how much is in the kids' junior ISAs'. Today's figures only: use project_finances for the future and query_salary for pay. Read-only.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1669,7 +1669,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "amount": {"type": "string", "description": "add: amount in pounds. confirm: only if it differed from usual."},
                     "account": {"type": "string", "description": "add: account it comes from or goes into."},
                     "direction": {"type": "string", "enum": ["out", "in"], "description": "add: out = payment (default), in = income."},
-                    "frequency": {"type": "string", "enum": ["weekly", "four_weekly", "monthly", "quarterly", "yearly"], "description": "add: how often (default monthly)."},
+                    "frequency": {"type": "string", "enum": ["weekly", "fortnightly", "four_weekly", "monthly", "quarterly", "yearly"], "description": "add: how often (default monthly)."},
                     "next_due": {"type": "string", "description": "add: next due date, YYYY-MM-DD (default today)."},
                     "category": {"type": "string", "description": "add: optional category name."},
                     "due_date": {"type": "string", "description": "confirm/skip: which due date, YYYY-MM-DD (default the oldest one waiting)."}
@@ -1712,6 +1712,103 @@ FUNCTION_TOOL_SCHEMAS = [
                     "owners": {"type": "array", "items": {"type": "string"}, "description": "set_owners: everyone who owns it, e.g. ['me', 'Sarah']."}
                 },
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "project_finances",
+            "description": "Project the household's finances into the future with the finance engine (month by month, loans, balloons, growth, salary per tax year, cash shortfall). Returns a yearly table, events, assumptions and warnings that already reconcile: quote them exactly and never recalculate. Use for 'project my net worth over 5 years', 'what will my mortgage be in 2030', 'when will I be debt free', 'can I afford', 'what if I earned £1,000 more a month', 'what if I sell the car'. What-ifs here are not saved. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "years": {"type": "integer", "minimum": 1, "maximum": 30, "description": "How many years ahead (default: the saved horizon, usually 5). Use 30 for 'when will I be debt free' or mortgage payoff questions."},
+                    "scenario": {"type": "string", "description": "A saved scenario's name to compare with the base case (matched loosely)."},
+                    "at": {"type": "string", "description": "A date or year to report, e.g. '2030' or '2030-06-01'."},
+                    "item": {"type": "string", "description": "Focus on one asset or debt, e.g. 'mortgage', 'house', 'pension'."},
+                    "extra_monthly_income": {"type": "string", "description": "What-if: extra £ a month coming in (from 'from')."},
+                    "reduce_monthly_spending": {"type": "string", "description": "What-if: £ a month less spending."},
+                    "from": {"type": "string", "description": "What-if start date (default today)."},
+                    "overpay": {"type": "string", "description": "What-if: overpay a loan by this £ amount."},
+                    "overpay_item": {"type": "string", "description": "Which loan to overpay (default the mortgage)."},
+                    "overpay_frequency": {"type": "string", "enum": ["monthly", "once"], "description": "Overpay every month (default) or once."},
+                    "sell": {"type": "string", "description": "What-if: sell this asset, e.g. 'car'."},
+                    "sell_on": {"type": "string", "description": "Sale date (default today)."},
+                    "sell_price": {"type": "string", "description": "Sale price in £ (default its projected value)."},
+                    "sell_clears": {"type": "string", "description": "A debt the proceeds pay off first, e.g. 'car finance'."},
+                    "balloon_choice": {"type": "string", "enum": ["pay", "hand_back", "refinance"], "description": "What-if at a PCP balloon: pay it, hand the car back, or refinance."},
+                    "balloon_item": {"type": "string", "description": "Which car finance (optional when there is only one)."},
+                    "refinance_months": {"type": "integer", "description": "Refinance over this many months."},
+                    "refinance_rate": {"type": "string", "description": "Refinance APR %."},
+                    "salary": {"type": "string", "description": "What-if: a new gross salary in £ a year (from salary_from)."},
+                    "pay_rise": {"type": "string", "description": "What-if: a pay rise, '3000' (£ a year) or '5%'."},
+                    "salary_from": {"type": "string", "description": "When the salary change starts."},
+                    "pension_percent": {"type": "string", "description": "What-if: your workplace pension contribution %."},
+                    "pension_method": {"type": "string", "enum": ["salary_sacrifice", "net_pay", "relief_at_source"], "description": "What-if: pension method."},
+                    "stop_work": {"type": "boolean", "description": "What-if: stop working (from 'from')."}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_projection_scenario",
+            "description": "List, save or delete named projection scenarios (what-ifs to compare later with project_finances). Each change has a type: extra_income or reduce_spending {amount, from, until}; one_off {amount, direction in/out, on}; overpay {liability, amount, monthly true/false, from or on}; sell {asset, on, price, clears}; balloon {liability, choice pay/hand_back/refinance, months, rate}; growth {asset_type or asset, rate}; salary {action raise/salary/bonus/pension_percent/pension_method/hours/stop, amount or percent, from}.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "save", "delete"], "description": "What to do (default list)."},
+                    "name": {"type": "string", "description": "save/delete: the scenario's name. Saving an existing name replaces it."},
+                    "changes": {"type": "array", "items": {"type": "object"}, "description": "save: the changes (see description); use names for liability/asset."},
+                    "notes": {"type": "string", "description": "save: optional notes."}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_salary",
+            "description": "The user's UK salary from the payroll engine: next (or a given) payslip broken down into tax, NI, student loan and pension; tax year to date; take-home, effective and marginal rate (incl. the 60% band); what the tax code means; the latest payslip check. Optional what-ifs for the whole tax year: salary, pay_rise, pension_percent, pension_method, bonus, tax_code. Use for 'what's my take-home', 'how much would a £3k raise give me', 'should I up my pension to 8%', 'is my tax code right'. Quote figures exactly. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job": {"type": "string", "description": "Employer, when the user has more than one job."},
+                    "date": {"type": "string", "description": "A pay date to show (default the next one)."},
+                    "salary": {"type": "string", "description": "What-if: gross salary £ a year."},
+                    "pay_rise": {"type": "string", "description": "What-if: '3000' (£ a year) or '5%'."},
+                    "pension_percent": {"type": "string", "description": "What-if: your pension contribution %."},
+                    "pension_method": {"type": "string", "enum": ["salary_sacrifice", "net_pay", "relief_at_source", "none"], "description": "What-if: pension method."},
+                    "bonus": {"type": "string", "description": "What-if: a one-off bonus £ in the next pay."},
+                    "tax_code": {"type": "string", "description": "What-if: a different tax code, e.g. '1257L' or 'K475'."}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_salary",
+            "description": "Change the user's salary setup (needs approval): pay_rise (percent or amount, from date, repeat yearly), set_salary (amount, optional from), tax_code (code, optional from), pension (percent, employer_percent, method), bonus (amount, on date). Reports the new calculated pay, take-home, pension contributions and 5-year projection.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["pay_rise", "set_salary", "tax_code", "pension", "bonus"]},
+                    "job": {"type": "string", "description": "Employer, when there is more than one job."},
+                    "percent": {"type": "string", "description": "pay_rise/pension: a percentage."},
+                    "amount": {"type": "string", "description": "pay_rise (£ a year), set_salary (£ a year) or bonus (£)."},
+                    "from": {"type": "string", "description": "When it starts (YYYY-MM-DD)."},
+                    "repeat": {"type": "string", "enum": ["once", "yearly"], "description": "pay_rise/bonus: 'yearly' only when the user says it happens every year; otherwise omit (once)."},
+                    "tax_code": {"type": "string", "description": "tax_code: the new code from the payslip or HMRC."},
+                    "employer_percent": {"type": "string", "description": "pension: the employer's %."},
+                    "method": {"type": "string", "enum": ["salary_sacrifice", "net_pay", "relief_at_source", "none"], "description": "pension: the method."}
+                },
+                "required": ["action"]
             }
         }
     },

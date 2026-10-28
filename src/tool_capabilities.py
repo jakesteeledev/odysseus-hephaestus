@@ -137,6 +137,8 @@ _register(
         "vault_search",
         # HEPHAESTUS PATCH: finance read; descriptions can come from imported bank files.
         "query_finances",
+        "project_finances",
+        "query_salary",
     },
     ToolEffect.READ_PRIVATE,
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
@@ -174,6 +176,8 @@ _register(
         "manage_recurring",
         "set_budget",
         "manage_members",
+        "manage_projection_scenario",
+        "update_salary",
     },
     ToolEffect.WRITE_PRIVATE,
 )
@@ -347,6 +351,7 @@ _PRIVATE_ACTION_READS: Mapping[str, frozenset[str]] = MappingProxyType(
         "manage_notes": frozenset({"list", "search", "find", "view"}),
         "manage_recurring": frozenset({"list"}),  # HEPHAESTUS PATCH
         "manage_members": frozenset({"list"}),  # HEPHAESTUS PATCH: finance v3
+        "manage_projection_scenario": frozenset({"list"}),  # HEPHAESTUS PATCH: projections
         "manage_research": frozenset({"list", "read", "open", "view", "get"}),
         "manage_session": frozenset({"list", "switch", "open", "select", "view"}),
         "manage_skills": frozenset({"list", "index", "view", "view_ref", "search"}),
@@ -371,6 +376,7 @@ _PRIVATE_ACTION_WRITES: Mapping[str, frozenset[str]] = MappingProxyType(
         "manage_notes": frozenset({"add", "update", "delete", "toggle_item"}),
         "manage_recurring": frozenset({"add", "confirm", "skip"}),  # HEPHAESTUS PATCH
         "manage_members": frozenset({"add", "update", "archive", "restore", "set_owners"}),  # HEPHAESTUS PATCH
+        "manage_projection_scenario": frozenset({"save", "delete"}),  # HEPHAESTUS PATCH: projections
         "manage_research": frozenset({"delete"}),
         "manage_session": frozenset(
             {
@@ -436,6 +442,7 @@ _ACTION_DEFAULTS: Mapping[str, str] = MappingProxyType(
         "manage_tasks": "list",
         "manage_recurring": "list",  # HEPHAESTUS PATCH
         "manage_members": "list",  # HEPHAESTUS PATCH: finance v3
+        "manage_projection_scenario": "list",  # HEPHAESTUS PATCH: projections
     }
 )
 

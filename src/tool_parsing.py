@@ -414,6 +414,12 @@ _TOOL_NAME_MAP = {
     "budget": "set_budget",
     "manage_members": "manage_members",
     "household_members": "manage_members",
+    "project_finances": "project_finances",  # HEPHAESTUS PATCH: projections and salary
+    "projection": "project_finances",
+    "manage_projection_scenario": "manage_projection_scenario",
+    "query_salary": "query_salary",
+    "salary": "query_salary",
+    "update_salary": "update_salary",
     "manage_bg_jobs": "manage_bg_jobs",
     "bg_jobs": "manage_bg_jobs",
     "background_jobs": "manage_bg_jobs",
